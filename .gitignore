@@ -17,6 +17,8 @@ coverage/
 *.sqlite
 *.sqlite-journal
 *.db
+*.db-journal
+dev.db*
 /data/
 /logs/
 /thumbnails/

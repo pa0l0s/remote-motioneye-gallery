@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Camera {
+  id            Int            @id @default(autoincrement())
+  motionEyeId   Int            @unique
+  name          String
+  createdAt     DateTime       @default(now())
+  mediaFiles    MediaFile[]
+  cursor        IndexCursor?
+  timelapseJobs TimelapseJob[]
+}
+
+model MediaFile {
+  id            Int      @id @default(autoincrement())
+  camera        Camera   @relation(fields: [cameraId], references: [id])
+  cameraId      Int
+  fileType      String   // "image" | "video"
+  remotePath    String
+  localPath     String
+  thumbnailPath String?
+  timestamp     DateTime
+  sizeBytes     Int?
+  isDownloaded  Boolean  @default(false)
+  thumbReady    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@unique([cameraId, remotePath])
+  @@index([cameraId, timestamp])
+}
+
+model IndexCursor {
+  cameraId    Int       @id
+  camera      Camera    @relation(fields: [cameraId], references: [id])
+  lastDateDir String?
+  lastRunAt   DateTime?
+  status      String    @default("idle") // idle | running | error
+}
+
+model TimelapseJob {
+  id          String   @id @default(cuid())
+  camera      Camera   @relation(fields: [cameraId], references: [id])
+  cameraId    Int
+  fromTs      DateTime
+  toTs        DateTime
+  fps         Int      @default(24)
+  everyNth    Int      @default(1)
+  width       Int? // null = source resolution
+  quality     String   @default("medium") // low | medium | high
+  status      String   @default("pending") // pending | downloading | encoding | done | failed | canceled
+  phase       String?
+  progress    Float    @default(0) // 0..1
+  framesTotal Int      @default(0)
+  framesReady Int      @default(0)
+  outputPath  String?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+}
