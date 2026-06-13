@@ -311,72 +311,80 @@ git commit -m "feat: typed env config loader"
 - Create: `src/motioneye/signature.ts`
 - Test: `tests/motioneye/signature.test.ts`
 
-**Background:** motionEye signs requests as
-`hmac_sha1(key, "METHOD:normalized_path:body:key").hexdigest()` where
-`key = sha1(password).hexdigest()`. The path is normalized: drop the `_signature`
-query param, sort remaining query params by name, rejoin as `path?a=1&b=2`, then replace
-any char NOT in `[a-zA-Z0-9/?_.=&{}\[\]":, ]` with `-`. The key string is normalized the
-same way before being used both as the HMAC key bytes and in the message.
+**Background (verified against the live server):** motionEye signs requests as
+**plain `sha1("METHOD:path:body:key")`** (NOT HMAC) where `key = sha1(password).hexdigest()`.
+The path normalization (from `motioneye-client/utils.py`): blank the scheme/host, drop the
+`_signature` param, sort remaining params by name, re-encode each value like
+`encodeURIComponent` (Python `quote(v, safe="!'()*~")`), rejoin as `path?a=1&b=2`, then
+replace any char NOT in `[a-zA-Z0-9/?_.=&{}\[\]":, -]` (note the trailing space and hyphen
+are allowed) with `-`. The key string is normalized the same way. `_username` must already
+be in the query before signing (the server keeps it, strips only `_signature`). Because we
+pass a relative path (no scheme/host), the blanking step is a no-op for us.
 
-- [ ] **Step 1: Generate the golden vector with Python (one-time, for the test)**
+Golden vectors are pre-computed (password `pw`); no need to regenerate, but the Python that
+produced them is below for reference.
 
-Run:
-```bash
-python3 - <<'PY'
-import hashlib, hmac, re
-from urllib.parse import urlparse, parse_qsl
-SIG_RE = re.compile(r'[^a-zA-Z0-9/?_.=&{}\[\]":, ]')
-def norm(s): return SIG_RE.sub('-', s)
-def compute(method, path, body, key):
-    p = urlparse(path)
-    q = [kv for kv in parse_qsl(p.query, keep_blank_values=True) if kv[0] != '_signature']
-    q.sort(key=lambda kv: kv[0])
-    query = '&'.join('='.join(kv) for kv in q)
-    np = p.path + ('?' + query if query else '?')
-    np = norm(np); key = norm(key)
-    msg = '%s:%s:%s:%s' % (method, np, body or '', key)
-    return hmac.new(key.encode(), msg.encode(), hashlib.sha1).hexdigest().lower()
-key = hashlib.sha1(b'pw').hexdigest()
-print("KEY", key)
-print("SIG", compute('GET', '/config/list?_username=admin', '', key))
-PY
+```python
+# Reference generator (already run; values baked into the test):
+import hashlib, re
+from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
+SIG_RE = re.compile(r'[^a-zA-Z0-9/?_.=&{}\[\]":, -]')
+def cs(method, path, body, key):
+    parts = list(urlsplit(path))
+    q = [t for t in parse_qsl(parts[3], keep_blank_values=True) if t[0] != "_signature"]
+    q.sort(key=lambda t: t[0])
+    qq = [(n, quote(v, safe="!'()*~")) for n, v in q]
+    parts[0] = parts[1] = ""; parts[3] = "&".join(n + "=" + v for n, v in qq)
+    p = SIG_RE.sub("-", urlunsplit(parts)); k = SIG_RE.sub("-", key)
+    return hashlib.sha1(("%s:%s:%s:%s" % (method, p, body or "", k)).encode()).hexdigest().lower()
+# sha1("pw")                                       = 1a91d62f7ca67399625a4368a6ab5d4a3baa6073
+# cs GET /config/list?_username=admin              = 870e1a7823970553d92522a7d95d2d3cf81c8c24
+# cs GET /picture/1/list?_username=admin&prefix=2026-06-13&with_stat=true
+#                                                  = bae24e33e84e86556ba52b7ab7011a745c01f59a
 ```
-Record the printed `SIG` value; paste it into the test below as `EXPECTED_SIG`.
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect } from "vitest";
 import { sha1Hex, computeSignature } from "../../src/motioneye/signature.js";
 
-// From the Python golden-vector step (password "pw"):
-const EXPECTED_SIG = "PASTE_FROM_PYTHON_STEP";
-
 describe("motionEye signature", () => {
   it("derives the key as sha1(password) hex", () => {
-    // sha1("pw") known value
-    expect(sha1Hex("pw")).toBe("c4f9375f9834b4e7f0a528cc65c055702bf5f24a");
+    expect(sha1Hex("pw")).toBe("1a91d62f7ca67399625a4368a6ab5d4a3baa6073");
   });
 
-  it("matches the python reference signature", () => {
+  it("matches the live-server reference signature for /config/list", () => {
     const key = sha1Hex("pw");
     const sig = computeSignature("GET", "/config/list?_username=admin", "", key);
-    expect(sig).toBe(EXPECTED_SIG);
+    expect(sig).toBe("870e1a7823970553d92522a7d95d2d3cf81c8c24");
+  });
+
+  it("matches the reference signature for a dated picture listing", () => {
+    const key = sha1Hex("pw");
+    const sig = computeSignature(
+      "GET",
+      "/picture/1/list?_username=admin&prefix=2026-06-13&with_stat=true",
+      "",
+      key,
+    );
+    expect(sig).toBe("bae24e33e84e86556ba52b7ab7011a745c01f59a");
   });
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/motioneye/signature.test.ts`
 Expected: FAIL (module not found / functions undefined).
 
-- [ ] **Step 4: Write minimal implementation**
+- [ ] **Step 3: Write minimal implementation**
 
 ```ts
-import { createHash, createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 
-const SIG_RE = /[^a-zA-Z0-9/?_.=&{}\[\]":, ]/g;
+// Allowed set matches motioneye-client (space and hyphen included).
+const SIG_RE = /[^a-zA-Z0-9/?_.=&{}\[\]":, -]/g;
 
 export function sha1Hex(input: string): string {
   return createHash("sha1").update(input, "utf8").digest("hex");
@@ -386,7 +394,7 @@ function normalize(s: string): string {
   return s.replace(SIG_RE, "-");
 }
 
-/** Mirrors motionEye utils.compute_signature. */
+/** Mirrors motioneye-client utils.compute_signature (plain SHA1, not HMAC). */
 export function computeSignature(
   method: string,
   path: string,
@@ -405,27 +413,28 @@ export function computeSignature(
       return eq === -1 ? [p, ""] : [p.slice(0, eq), p.slice(eq + 1)];
     })
     .filter(([k]) => k !== "_signature")
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    // Re-encode values like Python quote(v, safe="!'()*~") == encodeURIComponent.
+    .map(([k, v]) => `${k}=${encodeURIComponent(decodeURIComponent(v))}`);
 
-  const query = pairs.map(([k, v]) => `${k}=${v}`).join("&");
-  let np = `${basePath}?${query}`;
-  np = normalize(np);
+  const query = pairs.join("&");
+  const np = normalize(`${basePath}?${query}`);
   const nkey = normalize(key);
   const msg = `${method}:${np}:${body ?? ""}:${nkey}`;
-  return createHmac("sha1", nkey).update(msg, "utf8").digest("hex").toLowerCase();
+  return createHash("sha1").update(msg, "utf8").digest("hex").toLowerCase();
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/motioneye/signature.test.ts`
-Expected: PASS (2 tests). If the signature mismatches, compare the normalized path string in Node vs Python; they must be byte-identical.
+Expected: PASS (3 tests). If a signature mismatches, compare the normalized `np` string in Node vs the Python reference; they must be byte-identical.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/motioneye/signature.ts tests/motioneye/signature.test.ts
-git commit -m "feat: motionEye request signature (HMAC-SHA1) with golden-vector test"
+git commit -m "feat: motionEye request signature (plain SHA1) with live golden vectors"
 ```
 
 ---
@@ -436,9 +445,13 @@ git commit -m "feat: motionEye request signature (HMAC-SHA1) with golden-vector 
 - Create: `src/motioneye/client.ts`
 - Test: `tests/motioneye/client.test.ts`
 
-**Background:** The client builds signed URLs and fetches via undici. Cameras come from
-`GET /config/list` (returns `{ cameras: [{ id, name, ... }] }`). Directory listings come
-from `GET /picture/{id}/list?prefix=<dir>&with_stat=false` and the movie equivalent.
+**Background (verified live):** The client builds signed URLs and fetches via undici.
+Cameras come from `GET /config/list` → `{ cameras: [{ id, name, ... }] }`. Dated listings
+come from `GET /picture/{id}/list?prefix=YYYY-MM-DD&with_stat=true` →
+`{ cameraName, mediaList: [{ path:"/2026-06-13/16-07-30.jpg", mimeType:"image/jpeg",
+timestamp:1781359650.05, sizeStr:"606.2 kB", momentStr, momentStrShort }] }`. `timestamp`
+is a float epoch (seconds); `sizeStr` is human-readable. The movie equivalent is
+`/movie/{id}/list`.
 
 - [ ] **Step 1: Write the failing test (signed URL building, no network)**
 
@@ -494,8 +507,10 @@ export interface RemoteCamera {
 }
 
 export interface RemoteEntry {
-  path: string;       // path relative to the camera root, e.g. "2026-06-13/foo.jpg"
-  timestamp?: number; // seconds, when with_stat is on
+  path: string;       // path relative to the camera root, e.g. "/2026-06-13/16-07-30.jpg"
+  timestamp?: number; // float epoch seconds (with_stat=true)
+  mimeType?: string;  // e.g. "image/jpeg" | "video/mp4"
+  sizeStr?: string;   // e.g. "606.2 kB"
 }
 
 export class MotionEyeClient {
@@ -535,9 +550,16 @@ export class MotionEyeClient {
     cameraId: number,
     prefix: string,
   ): Promise<RemoteEntry[]> {
-    const q = `/${kind}/${cameraId}/list?prefix=${encodeURIComponent(prefix)}&with_stat=false`;
-    const data = await this.getJson<{ mediaList: Array<{ path: string; timestamp?: number }> }>(q);
-    return (data.mediaList ?? []).map((m) => ({ path: m.path, timestamp: m.timestamp }));
+    const q = `/${kind}/${cameraId}/list?prefix=${encodeURIComponent(prefix)}&with_stat=true`;
+    const data = await this.getJson<{
+      mediaList: Array<{ path: string; timestamp?: number; mimeType?: string; sizeStr?: string }>;
+    }>(q);
+    return (data.mediaList ?? []).map((m) => ({
+      path: m.path,
+      timestamp: m.timestamp,
+      mimeType: m.mimeType,
+      sizeStr: m.sizeStr,
+    }));
   }
 
   /** Absolute signed URL to fetch the full file bytes. */

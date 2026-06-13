@@ -99,10 +99,28 @@ internal ones used by its own frontend, as encoded in the official `motioneye-cl
 - `GET /movie/{id}/playback/{path}` — full movie.
 - `GET /picture|movie/{id}/preview/{path}` — native lightweight preview (fallback option).
 
-**Auth:** append `_username` and `_signature=<hex>` query params, where
-`key = sha1(password).hexdigest()` and the signature is computed over
-`method:normalized_path:body:key` (HMAC-SHA1, lowercase hex). Exact normalization is
-TDD'd against `motioneye-client` behavior.
+**Auth (verified against the live server 2026-06-13):** append `_username` and
+`_signature=<hex>` query params. `_username` must be present **before** signing (the
+server strips only `_signature`). `key = sha1(password).hexdigest()`. The signature is
+**plain `sha1("METHOD:path:body:key")`** (NOT HMAC), lowercase hex, where `path` has the
+scheme/host blanked, query params sorted by name, values re-encoded like
+`encodeURIComponent`, and every char outside `[a-zA-Z0-9/?_.=&{}\[\]":, -]` replaced with
+`-`. Confirmed working: `/config/list` returns `{cameras:[{id,name,...}]}` (currently 1
+camera: `Camera1`, id=1).
+
+**Verified listing shape:** `GET /picture/{id}/list?prefix=YYYY-MM-DD&with_stat=true`
+returns `{cameraName, mediaList:[{path:"/2026-06-13/16-07-30.jpg", mimeType:"image/jpeg",
+timestamp:1781359650.05, sizeStr:"606.2 kB", momentStr, momentStrShort}]}`. `timestamp` is
+an exact float epoch (no filename parsing needed); `sizeStr` gives a cheap data estimate.
+A per-date listing is fast (~570 pics/day); the **no-prefix full list times out** (the
+100k problem, reproduced), so the indexer must walk per-date and never fetch the full list.
+
+### 5.1 Shared remote-fetch gate
+
+All remote MotionEye access (indexer listings, on-demand media downloads, timelapse frame
+downloads) goes through a **single rate-limited queue** with a small concurrency cap
+(default 1-2). This prevents the background indexer and a running timelapse from saturating
+the weak GSM link simultaneously, and centralizes timeout/retry/backoff.
 
 ## 6. Data Model (Prisma / SQLite)
 
@@ -119,16 +137,21 @@ TDD'd against `motioneye-client` behavior.
 ## 7. Indexer (remote-driven, reconcile local)
 
 1. Discover cameras via `/config/list`; upsert `Camera` rows.
-2. Per camera, list top-level entries to enumerate date dirs (`YYYY-MM-DD`).
-3. Crawl **one date dir at a time** via `list?prefix=YYYY-MM-DD&with_stat=false` for both
-   pictures and movies. Never request the full unfiltered list.
-4. Store **metadata only** (remote path + timestamp parsed from filename). For each row,
-   stat the local disk; if the file already exists (pre-synced history), set
+2. **Walk by calendar date** (the full list times out). Starting from today and going
+   backward, request `list?prefix=YYYY-MM-DD&with_stat=true` for pictures and movies one
+   date at a time. Stop after a configurable run of consecutive empty days
+   (`INDEX_EMPTY_DAY_LIMIT`, default 30) or a configured `INDEX_START_DATE` floor. Never
+   request the unfiltered list.
+3. Store **metadata only** from the listing: `remotePath` (the `path` field), `timestamp`
+   (the exact float epoch from the response), `fileType` (from `mimeType`), and
+   `sizeBytes` (parsed from `sizeStr`). For each row, stat the local disk
+   (`MEDIA_ROOT/<camera>/<path>`); if the file already exists (pre-synced history), set
    `isDownloaded=true` without any download.
-5. **Resilience:** per-request timeout, retry with exponential backoff, persistent
-   `IndexCursor` so a GSM drop resumes at the next date dir. Failures logged to the config
-   volume; the worker continues rather than aborting the whole run.
-6. Indexing runs as a background loop with a configurable interval; newest dates first so
+4. **Resilience:** all requests go through the shared remote-fetch gate (§5.1) with
+   per-request timeout, retry with exponential backoff, and a persistent `IndexCursor` so a
+   GSM drop resumes at the next date. Failures are logged to the config volume; the worker
+   continues rather than aborting the whole run.
+5. Indexing runs as a background loop with a configurable interval; newest dates first so
    recent media appears soonest.
 
 ## 8. Media Proxy & Caching
@@ -167,6 +190,11 @@ TDD'd against `motioneye-client` behavior.
 
 ## 10. Timelapse Subsystem
 
+- **Pre-flight estimate (data-cost guardrail):** `GET /api/timelapse/estimate?cameraId&
+  fromTs&toTs&everyNth` → `{ framesSampled, framesLocal, framesToDownload,
+  estDownloadBytes }`, where `estDownloadBytes` sums `sizeBytes` of the not-yet-local
+  sampled frames. The UI shows this ("N frames, M to download, ~X MB over GSM") and the
+  user must confirm before a job starts. `everyNth` is the primary lever to shrink it.
 - **Create:** `POST /api/timelapse` with `{ cameraId, fromTs, toTs, fps, everyNth, width?,
   quality }` → creates a `TimelapseJob` (status `pending`) and returns its id.
 - **Worker (single in-process job at a time):**
@@ -250,6 +278,9 @@ Names only; real values stay in `deploy.local.env` (gitignored) and a committed
 - `KUKLE_POWER_LOGIN_URL` (redirect target on auth failure)
 - `CONFIG_DIR`, `MEDIA_ROOT`
 - `INDEX_INTERVAL_SECONDS`, `REQUEST_TIMEOUT_MS`, `MAX_RETRIES`
+- `INDEX_EMPTY_DAY_LIMIT` (stop after N consecutive empty days; default 30),
+  `INDEX_START_DATE` (optional floor, ISO date)
+- `REMOTE_CONCURRENCY` (shared remote-fetch gate cap; default 1)
 - `PORTAINER_URL`, `PORTAINER_API_KEY`, `STACK_NAME` (deploy.sh only)
 
 ## 16. Out of Scope (v1)
