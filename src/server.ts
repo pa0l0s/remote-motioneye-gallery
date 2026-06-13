@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
+import fastifyStatic from "@fastify/static";
 import type { MediaFile } from "@prisma/client";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
@@ -64,6 +66,18 @@ export async function buildApp() {
   registerCamerasRoute(app, client);
   registerMediaRoutes(app, { prisma, ensureFile, ensureThumbFor });
   registerTimelineRoutes(app, { prisma });
+
+  // Serve the built SPA (web/dist) with a history-API fallback.
+  const staticDir = resolve(process.env.STATIC_DIR ?? "web/dist");
+  if (existsSync(staticDir)) {
+    await app.register(fastifyStatic, { root: staticDir });
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === "GET" && !req.url.startsWith("/api/")) {
+        return reply.sendFile("index.html");
+      }
+      return reply.code(404).send({ error: "not found" });
+    });
+  }
 
   // Background indexing (non-blocking).
   const today = new Date().toISOString().slice(0, 10);

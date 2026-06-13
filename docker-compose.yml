@@ -27,7 +27,8 @@ services:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"
       # Media archive. Existing files are never modified; only new files are written.
-      - "${MEDIA_ROOT:-./media}:/media"
+      # Set MEDIA_RO_SUFFIX=":ro" to mount read-only (guarantees the archive is untouched).
+      - "${MEDIA_ROOT:-./media}:/media${MEDIA_RO_SUFFIX:-}"
     restart: unless-stopped
     extra_hosts:
       - "host-gateway:host-gateway"
