@@ -1,0 +1,33 @@
+# Stack for the MotionEye Proxy Gallery.
+# Secrets/paths come from the environment (Portainer stack Env array, or a local
+# --env-file deploy.local.env). Nothing sensitive is committed here.
+services:
+  gallery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: motioneye-proxy-gallery:latest
+    container_name: motioneye-proxy-gallery
+    ports:
+      - "${GALLERY_PORT:-8762}:8762"
+    environment:
+      PORT: "8762"
+      AUTH_ENABLED: "${AUTH_ENABLED:-true}"
+      MOTIONEYE_URL: "${MOTIONEYE_URL}"
+      MOTIONEYE_USER: "${MOTIONEYE_USER}"
+      MOTIONEYE_PASSWORD: "${MOTIONEYE_PASSWORD}"
+      SECRET_KEY: "${SECRET_KEY}"
+      KUKLE_POWER_LOGIN_URL: "${KUKLE_POWER_LOGIN_URL:-/}"
+      DATABASE_URL: "file:/config/gallery.db"
+      CONFIG_DIR: "/config"
+      MEDIA_ROOT: "/media"
+      REMOTE_CONCURRENCY: "${REMOTE_CONCURRENCY:-1}"
+      INDEX_EMPTY_DAY_LIMIT: "${INDEX_EMPTY_DAY_LIMIT:-30}"
+    volumes:
+      # App data (sqlite, logs, thumbnails). Owned by the app.
+      - "${CONFIG_DIR:-./data}:/config"
+      # Media archive. Existing files are never modified; only new files are written.
+      - "${MEDIA_ROOT:-./media}:/media"
+    restart: unless-stopped
+    extra_hosts:
+      - "host-gateway:host-gateway"

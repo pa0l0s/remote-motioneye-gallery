@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+docs
+*.db
+*.db-journal
+data
+media
+deploy.local.env
+.env
+.env.*
+!.env.example
