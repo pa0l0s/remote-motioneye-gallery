@@ -74,4 +74,19 @@ export class MotionEyeClient {
     const verb = kind === "picture" ? "download" : "playback";
     return this.signUrl("GET", `/${kind}/${cameraId}/${verb}/${path}`);
   }
+
+  /** Open a streaming GET for a media file. Caller consumes `body`. */
+  async downloadStream(
+    kind: "picture" | "movie",
+    cameraId: number,
+    path: string,
+  ): Promise<{ statusCode: number; body: NodeJS.ReadableStream }> {
+    const url = this.fileUrl(kind, cameraId, path);
+    const res = await request(url, {
+      method: "GET",
+      headersTimeout: this.opts.timeoutMs,
+      bodyTimeout: this.opts.timeoutMs,
+    });
+    return { statusCode: res.statusCode, body: res.body };
+  }
 }
