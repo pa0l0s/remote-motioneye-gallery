@@ -10,13 +10,17 @@
 
 ## 1. Purpose & Constraints
 
-Build a Dockerized "Smart Proxy Gallery" that displays photos and videos from a remote
-MotionEye instance while minimizing data transfer over a weak, metered GSM link.
+Build a Dockerized "Smart Proxy Gallery" over a remote MotionEye archive that is a
+**time-series of surveillance frames** (one image every few seconds, 100,000+ frames),
+not a casual photo gallery. It must browse, search, and scrub that timeline smoothly, let
+the user generate timelapse videos from any period, and minimize data transfer over a
+weak, metered GSM link.
 
 - Remote MotionEye is reached at `MOTIONEYE_URL` with `MOTIONEYE_USER` / `MOTIONEYE_PASSWORD`.
 - The remote has 100,000+ files; fetching the full list times out and drains data.
 - Core goal: index incrementally per-date, cache media locally on demand, and serve local
   copies at **0 GSM bytes** whenever possible.
+- Professional, dynamic, stylish dark-mode UX throughout.
 - Deployed as a Portainer stack on a private LAN host.
 
 ## 2. Key Decisions (locked during brainstorming)
@@ -30,6 +34,14 @@ MotionEye instance while minimizing data transfer over a weak, metered GSM link.
    syncs source to the host and (re)creates the Portainer stack via API.
 5. **Media root:** mount the parent `motioneye/` folder so each camera folder sits side by
    side, mirroring remote `/var/lib/motioneye/`.
+6. **Timeline navigation:** a zoomable activity-density timeline (year → minute) plus a
+   precise date/time search that jumps the virtualized grid to a moment.
+7. **Timelapse:** user-defined period + fps + frame sampling + resolution/quality + camera;
+   missing frames are auto-downloaded (sampling applied first to bound the fetch), encoded
+   to mp4/H.264.
+8. **Background jobs:** timelapse runs server-side as a single in-process worker, persisted
+   in the DB (survives restart, resumable), progress streamed via SSE. The gallery stays
+   fully usable during generation; progress is always visible in a persistent task tray.
 
 ## 3. Corrected Assumption: SSO is itsdangerous, not JWT
 
@@ -61,12 +73,13 @@ shows reality:
 ## 4. Technical Stack
 
 - **Backend:** Node 22 + TypeScript, **Fastify** (lowest overhead of the candidates),
-  with an in-process background indexer worker.
+  with in-process background workers (indexer + timelapse).
 - **DB:** SQLite via Prisma, file stored in the config volume.
 - **Thumbnails:** `sharp` for image thumbnails; `ffmpeg` (ffmpeg-static + fluent-ffmpeg)
-  for video poster frames.
+  for video poster frames and timelapse encoding.
 - **Frontend:** React + Vite + TypeScript + Tailwind + Framer Motion; virtualized grid
-  via `@tanstack/react-virtual`; custom HTML5 video player.
+  via `@tanstack/react-virtual`; custom HTML5 video player; canvas/SVG timeline.
+- **Realtime:** Server-Sent Events (SSE) for job progress.
 - **Design language:** strict dark mode (deep blacks, dark grays, glowing accents),
   taste-skill "Soft" variant — high MOTION_INTENSITY, medium VISUAL_DENSITY. Skeleton
   loaders, expand-to-lightbox transitions, elegant hover. No em-dashes in UI copy
@@ -97,8 +110,11 @@ TDD'd against `motioneye-client` behavior.
 - `MediaFile(id, cameraId, fileType[image|video], remotePath, localPath, thumbnailPath,
   timestamp, sizeBytes?, isDownloaded, thumbReady, createdAt)`
   - Unique constraint on `(cameraId, remotePath)`.
-  - Indexed on `(cameraId, timestamp)` for grid pagination.
+  - Indexed on `(cameraId, timestamp)` — powers grid pagination, histogram, and seek.
 - `IndexCursor(cameraId, lastDateDir, lastRunAt, status)` — resume-after-drop state.
+- `TimelapseJob(id, cameraId, fromTs, toTs, fps, everyNth, width?, quality, status
+  [pending|downloading|encoding|done|failed|canceled], phase?, progress[0..1], framesTotal,
+  framesReady, outputPath?, error?, createdAt, updatedAt)` — persisted background jobs.
 
 ## 7. Indexer (remote-driven, reconcile local)
 
@@ -133,21 +149,75 @@ TDD'd against `motioneye-client` behavior.
 - **Thumbnail isolation:** all thumbnails/metadata/cache live in the config volume only;
   the media volume stays pristine.
 
-## 9. Frontend UX
+## 9. Timeline Navigation (time-series browsing)
 
-- Virtualized grid backed by `/api/media?cameraId=&cursor=&limit=` over the local DB,
-  handling 100k+ rows smoothly.
-- Filters by camera and date; skeleton placeholders while thumbs load.
-- Framer Motion expand-to-lightbox with smooth image expansion; custom HTML5 video player
-  with smooth buffering for movie files.
-- Strict dark mode with glowing accents and micro-interactions per taste-skill.
+- **Histogram endpoint:** `GET /api/cameras/:id/histogram?from&to&bucket=day|hour|minute`
+  → array of `{ bucketStart, count }`. SQL `GROUP BY` on the timestamp truncated to the
+  bucket, range-scanned via the `(cameraId, timestamp)` index. Buckets keep the payload
+  tiny regardless of 100k+ frames.
+- **Seek endpoint:** `GET /api/cameras/:id/seek?at=<iso>` → `{ mediaId, index }`, where
+  `index = COUNT(timestamp < at)` for that camera. Lets the virtualized grid scroll
+  directly to a moment.
+- **Grid feed:** `GET /api/media?cameraId&from&to&cursor&limit` ordered by timestamp,
+  keyset-paginated for smooth virtual scroll over 100k+ rows.
+- **Frontend:** a zoomable activity-density timeline (canvas/SVG bars from the histogram),
+  drag to scrub, scroll/pinch to zoom across year → month → day → hour → minute, plus a
+  precise date/time jump box. Selecting a point calls seek and positions the grid. A
+  range selection on the timeline feeds the timelapse builder.
 
-## 10. Volumes & Deployment
+## 10. Timelapse Subsystem
+
+- **Create:** `POST /api/timelapse` with `{ cameraId, fromTs, toTs, fps, everyNth, width?,
+  quality }` → creates a `TimelapseJob` (status `pending`) and returns its id.
+- **Worker (single in-process job at a time):**
+  1. Query the camera's `image` frames in `[fromTs, toTs]` ordered by timestamp; apply
+     `everyNth` sampling **first**, so only the frames the video will use are considered.
+  2. **Download phase:** for sampled frames where `isDownloaded=false`, fetch from remote
+     (reusing the media-proxy download path), preserve structure, mark downloaded; update
+     `framesReady` / `progress`. (User chose auto-download of missing frames; sampling
+     keeps the fetch bounded.)
+  3. **Encode phase:** feed the ordered local frames to ffmpeg → mp4/H.264 at the chosen
+     `fps`, scaled to `width` (null = source), `quality` preset → write to
+     `CONFIG_DIR/timelapses/<id>.mp4`.
+  4. `status=done`, `outputPath` set.
+- **Progress / control:**
+  - `GET /api/timelapse/:id/events` — SSE stream of `{ status, phase, progress,
+    framesReady, framesTotal }`.
+  - `GET /api/timelapse` — list jobs (for the task tray on load).
+  - `POST /api/timelapse/:id/retry` — re-run a `failed` job; already-downloaded frames are
+    skipped (`isDownloaded` persists), so a mid-download GSM drop resumes cheaply.
+  - `POST /api/timelapse/:id/cancel` — stop a running/pending job.
+  - `GET /api/timelapse/:id/download` — stream the finished mp4.
+- **Output isolation:** timelapse mp4s live in the config volume, never the media volume.
+
+## 11. Background Task UX (non-blocking, always visible)
+
+- The gallery remains **fully interactive** during timelapse generation (jobs run
+  server-side). The user can browse, scrub, and queue more jobs.
+- A **persistent task tray docked bottom-right** (download-manager pattern) is always
+  visible while any job is active. It shows a compact live progress pill per job and
+  expands on click into job cards with phase (download % → encode %), animated progress,
+  and retry/cancel. A finished job offers inline playback / download.
+- The frontend keeps a **global SSE subscription** so progress updates everywhere and
+  survives navigation. On load it calls `GET /api/timelapse` to restore active jobs.
+- Header carries nav + camera/date filters + the timeline; the tray stays out of the way
+  bottom-right so it never competes with primary controls.
+
+## 12. Frontend UX (overall)
+
+- Virtualized grid over the local DB handling 100k+ time-ordered frames smoothly, with
+  skeleton placeholders while thumbs load.
+- Framer Motion expand-to-lightbox; custom HTML5 video player for movie files and finished
+  timelapses, with smooth buffering.
+- Strict dark mode with glowing accents and micro-interactions per taste-skill; a polished,
+  professional, dynamic feel throughout.
+
+## 13. Volumes & Deployment
 
 All host-specific values (paths, IPs, API keys) live only in the gitignored
 `deploy.local.env`, referenced here by name:
 
-- **Config/DB/logs/thumbnails:** `CONFIG_DIR` on the host
+- **Config/DB/logs/thumbnails/timelapses:** `CONFIG_DIR` on the host
   (e.g. `.../DockerConfig/motioneye-proxy-gallery`).
 - **Media root:** `MEDIA_ROOT` on the host (the parent of the per-camera folders;
   existing files never modified).
@@ -156,7 +226,7 @@ All host-specific values (paths, IPs, API keys) live only in the gitignored
   (compose `build:` builds the image on the host). Pushes env values into the stack Env
   array, mirroring kukle-power's deploy pattern. Reads real values from `deploy.local.env`.
 
-## 11. Testing Strategy (TDD)
+## 14. Testing Strategy (TDD)
 
 - MotionEye signature computation vs known-good values from `motioneye-client`.
 - itsdangerous cookie verification vs a real token generated by the Python library with
@@ -164,9 +234,12 @@ All host-specific values (paths, IPs, API keys) live only in the gitignored
 - Indexer cursor/resume logic across simulated network drops; "file exists locally →
   isDownloaded without fetch" reconciliation.
 - Proxy paths: "exists → 0-fetch stream" and "missing → download + preserve structure +
-  never overwrite" and thumbnail generation for image vs video.
+  never overwrite"; thumbnail generation for image vs video.
+- Histogram bucketing and seek index math against a seeded DB.
+- Timelapse worker: sampling math (everyNth), resume-skips-downloaded, status/progress
+  transitions, retry of a failed job; ffmpeg invocation arguments.
 
-## 12. Environment Variables
+## 15. Environment Variables
 
 Names only; real values stay in `deploy.local.env` (gitignored) and a committed
 `.env.example` documents the keys with placeholder values.
@@ -179,9 +252,11 @@ Names only; real values stay in `deploy.local.env` (gitignored) and a committed
 - `INDEX_INTERVAL_SECONDS`, `REQUEST_TIMEOUT_MS`, `MAX_RETRIES`
 - `PORTAINER_URL`, `PORTAINER_API_KEY`, `STACK_NAME` (deploy.sh only)
 
-## 13. Out of Scope (v1)
+## 16. Out of Scope (v1)
 
 - Minting tokens / modifying kukle-power.
 - Multi-user roles (kukle-power is single-admin).
-- Bulk pre-download / sync-all (defeats the data-saving goal).
+- Blanket "sync everything" mirroring. Gallery browsing stays lazy/0-byte; the only bulk
+  fetch is a user-initiated timelapse, bounded by frame sampling and made resumable.
 - Per-camera storage paths beyond the shared `motioneye/` parent.
+- Concurrent timelapse encoding (one job at a time by design, to bound GSM + CPU).
