@@ -5,7 +5,8 @@ import type { PrismaClient, MediaFile } from "@prisma/client";
 export interface MediaDeps {
   prisma: PrismaClient;
   ensureFile: (mf: MediaFile) => Promise<string>;
-  ensureThumbFor: (mf: MediaFile) => Promise<string>;
+  /** Returns the local thumb path, or null when the source is not local (no remote fetch). */
+  ensureThumbFor: (mf: MediaFile) => Promise<string | null>;
 }
 
 // Cursor encodes "<timestampMs>_<id>" for stable keyset pagination.
@@ -65,6 +66,9 @@ export function registerMediaRoutes(app: FastifyInstance, deps: MediaDeps): void
     const mf = await load(Number((req.params as { id: string }).id));
     if (!mf) return reply.code(404).send({ error: "not found" });
     const path = await deps.ensureThumbFor(mf);
+    // 409 means "not available locally" — the client shows a placeholder and never
+    // triggers a remote download for a thumbnail.
+    if (!path) return reply.code(409).send({ error: "not downloaded" });
     reply.header("content-type", "image/webp");
     return reply.send(createReadStream(path));
   });

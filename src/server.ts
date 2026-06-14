@@ -15,8 +15,11 @@ import { registerMediaRoutes } from "./routes/media.js";
 import { registerTimelineRoutes } from "./routes/timeline.js";
 import { ensureDownloaded } from "./media/store.js";
 import { ensureThumb } from "./media/thumbnails.js";
+import { isZeroByte } from "./media/validate.js";
 import { thumbPathFor } from "./indexer/mediaPaths.js";
 import { runIndexOnce, startIndexLoop } from "./indexer/runner.js";
+import { DownloadManager } from "./downloads/manager.js";
+import { registerDownloadRoutes } from "./routes/downloads.js";
 
 export async function buildApp() {
   const cfg = loadConfig();
@@ -58,19 +61,28 @@ export async function buildApp() {
       force,
     });
   }
-  async function ensureThumbFor(mf: MediaFile): Promise<string> {
-    const local = await ensureFile(mf);
+  // Thumbnails are LOCAL-ONLY: never download from the remote GSM site. If the source
+  // isn't a valid local file, return null and the client shows a placeholder. Remote
+  // downloads only ever happen via explicit user actions (lightbox click, download jobs).
+  async function ensureThumbFor(mf: MediaFile): Promise<string | null> {
+    const local = mf.localPath;
+    if (!existsSync(local) || isZeroByte(local)) return null;
     const cam = await prisma.camera.findUnique({ where: { id: mf.cameraId } });
     const thumb = thumbPathFor(cfg.configDir, cam?.name ?? "Camera", mf.remotePath);
-    // Self-healing: if the local source is corrupt/0-byte, force a re-download and retry once.
-    return ensureThumb(local, thumb, mf.fileType as "image" | "video", undefined, () =>
-      ensureFile(mf, true),
-    );
+    try {
+      return await ensureThumb(local, thumb, mf.fileType as "image" | "video");
+    } catch {
+      // Corrupt local source: do NOT auto-refetch; surface as "not available".
+      return null;
+    }
   }
+
+  const downloads = new DownloadManager(prisma, gate, client);
 
   registerCamerasRoute(app, client);
   registerMediaRoutes(app, { prisma, ensureFile, ensureThumbFor });
   registerTimelineRoutes(app, { prisma });
+  registerDownloadRoutes(app, { prisma, manager: downloads });
 
   // Serve the built SPA (web/dist) with a history-API fallback.
   const staticDir = resolve(process.env.STATIC_DIR ?? "web/dist");

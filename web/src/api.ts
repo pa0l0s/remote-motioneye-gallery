@@ -24,6 +24,19 @@ export interface HistogramBucket {
   count: number;
 }
 
+export interface DownloadJob {
+  id: string;
+  cameraId: number;
+  label: string;
+  total: number;
+  done: number;
+  failed: number;
+  bytes: number;
+  status: "running" | "done" | "error" | "canceled";
+  createdAt: number;
+  updatedAt: number;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
@@ -50,4 +63,14 @@ export const api = {
   },
   thumbUrl: (id: number) => `/api/media/${id}/thumb`,
   fileUrl: (id: number) => `/api/media/${id}/file`,
+
+  createDownload: (body: { cameraId: number; mediaIds?: number[]; day?: string }) =>
+    fetch("/api/downloads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json() as Promise<DownloadJob | { id: null; total: number; message: string }>),
+  listDownloads: () => getJson<DownloadJob[]>("/api/downloads"),
+  cancelDownload: (id: string) =>
+    fetch(`/api/downloads/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
 };

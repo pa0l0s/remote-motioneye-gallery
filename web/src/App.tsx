@@ -6,6 +6,7 @@ import type { Camera, HistogramBucket, MediaFile } from "./api";
 import { Thumb } from "./components/Thumb";
 import { Timeline } from "./components/Timeline";
 import { Lightbox } from "./components/Lightbox";
+import { TaskTray } from "./components/TaskTray";
 import { fmtDate } from "./lib/format";
 
 const GAP = 8;
@@ -16,15 +17,17 @@ export function App() {
   const [camera, setCamera] = useState<Camera | null>(null);
   const [buckets, setBuckets] = useState<HistogramBucket[]>([]);
   const [activeBucket, setActiveBucket] = useState<string | undefined>(undefined);
+  const [currentFrom, setCurrentFrom] = useState<string | undefined>(undefined);
   const [items, setItems] = useState<MediaFile[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [pokes, setPokes] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
 
-  // --- bootstrap ---
   useEffect(() => {
     api.cameras().then((cs) => {
       setCameras(cs);
@@ -56,7 +59,12 @@ export function App() {
     setLoading(false);
   }, [camera, cursor, loading]);
 
-  // --- responsive column count ---
+  // Re-fetch the current view (used after a download batch settles so cached flips on).
+  const refreshView = useCallback(() => {
+    if (camera) void loadFirstPage(camera, currentFrom);
+    if (camera) api.histogram(camera.id, "day").then(setBuckets);
+  }, [camera, currentFrom, loadFirstPage]);
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -78,7 +86,6 @@ export function App() {
     overscan: 4,
   });
 
-  // infinite load when near the end
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -88,7 +95,29 @@ export function App() {
   const pickBucket = (b: string) => {
     if (!camera) return;
     setActiveBucket(b);
+    setCurrentFrom(`${b}T00:00:00Z`);
     void loadFirstPage(camera, `${b}T00:00:00Z`);
+  };
+
+  const toggleSelect = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const downloadSelected = async () => {
+    if (!camera || selected.size === 0) return;
+    await api.createDownload({ cameraId: camera.id, mediaIds: [...selected] });
+    setSelected(new Set());
+    setPokes((p) => p + 1);
+  };
+
+  const downloadDay = async () => {
+    if (!camera || !activeBucket) return;
+    await api.createDownload({ cameraId: camera.id, day: activeBucket });
+    setPokes((p) => p + 1);
   };
 
   const open = (m: MediaFile) => setOpenIndex(items.findIndex((x) => x.id === m.id));
@@ -133,12 +162,44 @@ export function App() {
       <div className="relative z-10 h-28 border-b border-hairline bg-surface/30">
         <div className="flex items-center justify-between px-6 pt-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted">
           <span>activity timeline</span>
-          {activeBucket && <span className="text-amber">{fmtDate(`${activeBucket}T00:00:00Z`)}</span>}
+          <span className="flex items-center gap-3">
+            {activeBucket && <span className="text-amber">{fmtDate(`${activeBucket}T00:00:00Z`)}</span>}
+            {activeBucket && (
+              <button
+                onClick={downloadDay}
+                className="rounded border border-hairline px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-fg transition hover:shadow-glow"
+              >
+                ↓ download day
+              </button>
+            )}
+          </span>
         </div>
         <div className="h-[88px]">
           <Timeline buckets={buckets} activeBucket={activeBucket} onPick={pickBucket} />
         </div>
       </div>
+
+      {/* ---- Selection toolbar ---- */}
+      {selected.size > 0 && (
+        <motion.div
+          initial={{ y: -8, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="relative z-10 flex items-center justify-between border-b border-amber/30 bg-amber/5 px-6 py-2 font-mono text-xs"
+        >
+          <span className="text-amber">{selected.size} selected</span>
+          <span className="flex items-center gap-3">
+            <button onClick={() => setSelected(new Set())} className="text-muted hover:text-fg">
+              clear
+            </button>
+            <button
+              onClick={downloadSelected}
+              className="rounded border border-amber bg-amber px-3 py-1 font-medium text-ink transition hover:opacity-90"
+            >
+              ↓ download selected
+            </button>
+          </span>
+        </motion.div>
+      )}
 
       {/* ---- Grid ---- */}
       <div ref={scrollRef} onScroll={onScroll} className="relative z-10 flex-1 overflow-auto px-6 py-5">
@@ -171,7 +232,13 @@ export function App() {
                 }}
               >
                 {rowItems.map((m) => (
-                  <Thumb key={m.id} media={m} onOpen={open} />
+                  <Thumb
+                    key={m.id}
+                    media={m}
+                    onOpen={open}
+                    selected={selected.has(m.id)}
+                    onToggleSelect={toggleSelect}
+                  />
                 ))}
               </div>
             );
@@ -207,6 +274,8 @@ export function App() {
         onPrev={() => setOpenIndex((i) => (i === null ? null : Math.max(0, i - 1)))}
         onNext={() => setOpenIndex((i) => (i === null ? null : Math.min(items.length - 1, i + 1)))}
       />
+
+      <TaskTray pokes={pokes} onJobsSettled={refreshView} />
     </div>
   );
 }
