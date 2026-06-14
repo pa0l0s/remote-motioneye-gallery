@@ -30,6 +30,7 @@ export interface CreateArgs {
  */
 export class DownloadManager {
   private jobs = new Map<string, DownloadJob>();
+  private ids = new Map<string, number[]>();
   private queue: string[] = [];
   private running = false;
   private cancelSet = new Set<string>();
@@ -55,7 +56,7 @@ export class DownloadManager {
       updatedAt: Date.now(),
     };
     this.jobs.set(id, job);
-    (job as DownloadJob & { _ids: number[] })._ids = args.mediaIds;
+    this.ids.set(id, args.mediaIds);
     this.queue.push(id);
     void this.pump();
     return job;
@@ -86,7 +87,7 @@ export class DownloadManager {
   private async process(id: string): Promise<void> {
     const job = this.jobs.get(id);
     if (!job) return;
-    const ids = (job as DownloadJob & { _ids: number[] })._ids ?? [];
+    const ids = this.ids.get(id) ?? [];
     const cam = await this.prisma.camera.findUnique({ where: { id: job.cameraId } });
 
     for (const mediaId of ids) {
