@@ -9,6 +9,7 @@ interface TimelineProps {
 
 const BAR_WIDTH = 7;
 const BAR_GAP = 3;
+const STEP = BAR_WIDTH + BAR_GAP;
 const TICK_EVERY = 5; // label every Nth day
 const DRAG_THRESHOLD = 5; // px movement below which a drag counts as a click
 
@@ -23,30 +24,40 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Drag-pan state. We track via refs so listeners stay cheap, and a tiny bit of
-  // React state only to toggle the grabbing cursor.
   const dragging = useRef(false);
   const moved = useRef(false);
   const startX = useRef(0);
   const startScroll = useRef(0);
   const [grabbing, setGrabbing] = useState(false);
 
-  // Translate vertical wheel gestures into horizontal scroll, and keep the page
-  // from scrolling while the pointer is over the timeline. Registered as a
-  // non-passive native listener so preventDefault() actually takes effect.
+  // Wheel over the timeline scrolls it horizontally and never lets the gesture fall
+  // through to the grid. Non-passive native listener so preventDefault() works. The
+  // container is always rendered (even while empty) so this attaches exactly once.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      // Honour an existing horizontal gesture (trackpads); otherwise remap Y -> X.
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       if (delta === 0) return;
-      el.scrollLeft += delta;
       e.preventDefault();
+      el.scrollLeft += delta;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
+
+  // Keep the active day visible: when it changes (e.g. driven by grid scroll) and the
+  // bar is off-screen, bring it into view without fighting a manual horizontal scroll.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !activeBucket) return;
+    const idx = buckets.findIndex((b) => b.bucket === activeBucket);
+    if (idx < 0) return;
+    const left = idx * STEP;
+    if (left < el.scrollLeft || left > el.scrollLeft + el.clientWidth - STEP) {
+      el.scrollTo({ left: left - el.clientWidth / 2, behavior: "smooth" });
+    }
+  }, [activeBucket, buckets]);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const el = scrollRef.current;
@@ -71,22 +82,13 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
     setGrabbing(false);
   }, []);
 
-  // Suppress the click that follows a real drag so it doesn't pick a bucket.
   const onBarClick = useCallback(
     (bucket: string) => {
-      if (moved.current) return;
+      if (moved.current) return; // a real drag should not pick a day
       onPick(bucket);
     },
     [onPick],
   );
-
-  if (buckets.length === 0) {
-    return (
-      <div className="flex h-full items-center px-4 font-mono text-xs text-muted">
-        awaiting index data…
-      </div>
-    );
-  }
 
   return (
     <div
@@ -99,47 +101,50 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
         grabbing ? "cursor-grabbing" : "cursor-grab"
       }`}
     >
-      {/* Bars */}
-      <div
-        className="flex flex-1 items-end pt-2"
-        style={{ gap: `${BAR_GAP}px` }}
-      >
-        {buckets.map((b) => {
-          const h = 12 + (b.count / max) * 100;
-          const active = b.bucket === activeBucket;
-          return (
-            <button
-              key={b.bucket}
-              onClick={() => onBarClick(b.bucket)}
-              title={`${b.bucket} · ${b.count} frames`}
-              className="group relative flex h-full shrink-0 flex-col items-center justify-end"
-              style={{ width: `${BAR_WIDTH}px` }}
-            >
-              <span
-                className={`w-full rounded-sm transition-all duration-200 ${
-                  active
-                    ? "bg-amber shadow-glow"
-                    : "bg-teal/30 group-hover:bg-amber/70"
-                }`}
-                style={{ height: `${h}%` }}
-              />
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Date scale: a tick label under every Nth bar, aligned to its column. */}
-      <div className="flex shrink-0 pb-1 pt-1" style={{ gap: `${BAR_GAP}px` }}>
-        {buckets.map((b, i) => (
-          <div
-            key={b.bucket}
-            className="shrink-0 text-center font-mono text-[9px] leading-none text-muted"
-            style={{ width: `${BAR_WIDTH}px` }}
-          >
-            {i % TICK_EVERY === 0 ? dayLabel(b.bucket) : null}
+      {buckets.length === 0 ? (
+        <div className="flex h-full items-center font-mono text-xs text-muted">
+          awaiting index data…
+        </div>
+      ) : (
+        <>
+          {/* Bars */}
+          <div className="flex flex-1 items-end pt-2" style={{ gap: `${BAR_GAP}px` }}>
+            {buckets.map((b) => {
+              const h = 12 + (b.count / max) * 100;
+              const active = b.bucket === activeBucket;
+              return (
+                <button
+                  key={b.bucket}
+                  onClick={() => onBarClick(b.bucket)}
+                  title={`${b.bucket} · ${b.count} frames`}
+                  className="group relative flex h-full shrink-0 flex-col items-center justify-end"
+                  style={{ width: `${BAR_WIDTH}px` }}
+                >
+                  <span
+                    className={`w-full rounded-sm transition-all duration-200 ${
+                      active ? "bg-amber shadow-glow" : "bg-teal/30 group-hover:bg-amber/70"
+                    }`}
+                    style={{ height: `${h}%` }}
+                  />
+                </button>
+              );
+            })}
           </div>
-        ))}
-      </div>
+
+          {/* Date scale: a tick label under every Nth bar, aligned to its column. */}
+          <div className="flex shrink-0 pb-1 pt-1" style={{ gap: `${BAR_GAP}px` }}>
+            {buckets.map((b, i) => (
+              <div
+                key={b.bucket}
+                className="shrink-0 text-center font-mono text-[9px] leading-none text-muted"
+                style={{ width: `${BAR_WIDTH}px` }}
+              >
+                {i % TICK_EVERY === 0 ? dayLabel(b.bucket) : null}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

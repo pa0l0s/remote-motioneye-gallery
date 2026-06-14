@@ -86,11 +86,20 @@ export function App() {
     overscan: 4,
   });
 
-  const onScroll = useCallback(() => {
+  // Plain function (re-created each render) so it sees fresh items/cols/rowH.
+  const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < rowH * 3) void loadMore();
-  }, [loadMore, rowH]);
+    // Sync the timeline's selected day to whatever day is at the top of the viewport.
+    const firstRow = Math.floor(el.scrollTop / rowH);
+    const idx = Math.min(items.length - 1, Math.max(0, firstRow * cols));
+    const it = items[idx];
+    if (it) {
+      const day = new Date(it.timestamp).toISOString().slice(0, 10);
+      setActiveBucket((prev) => (prev === day ? prev : day));
+    }
+  };
 
   const pickBucket = (b: string) => {
     if (!camera) return;
