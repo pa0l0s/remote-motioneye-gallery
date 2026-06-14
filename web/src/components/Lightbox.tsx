@@ -9,6 +9,8 @@ interface LightboxProps {
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /** Fired when an image finishes downloading, so the grid can refresh its thumbnail. */
+  onDownloaded?: (id: number) => void;
 }
 
 type Phase = "fetching" | "downloading" | "loaded" | "error";
@@ -69,10 +71,16 @@ function useImageDownload(media: MediaFile | null) {
   return { phase, received, url, retry: () => setAttempt((a) => a + 1) };
 }
 
-export function Lightbox({ media, onClose, onPrev, onNext }: LightboxProps) {
+export function Lightbox({ media, onClose, onPrev, onNext, onDownloaded }: LightboxProps) {
   const { phase, received, url, retry } = useImageDownload(media);
   const total = media?.sizeBytes ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+
+  // When an image finishes downloading, let the grid flip it to "cached" so its
+  // thumbnail loads instead of staying a placeholder.
+  useEffect(() => {
+    if (phase === "loaded" && media && media.fileType === "image") onDownloaded?.(media.id);
+  }, [phase, media?.id]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

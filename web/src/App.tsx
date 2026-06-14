@@ -120,6 +120,12 @@ export function App() {
     setPokes((p) => p + 1);
   };
 
+  const markDownloaded = useCallback(
+    (id: number) =>
+      setItems((prev) => prev.map((m) => (m.id === id ? { ...m, isDownloaded: true } : m))),
+    [],
+  );
+
   const open = (m: MediaFile) => setOpenIndex(items.findIndex((x) => x.id === m.id));
   const total = buckets.reduce((s, b) => s + b.count, 0);
 
@@ -273,6 +279,7 @@ export function App() {
         onClose={() => setOpenIndex(null)}
         onPrev={() => setOpenIndex((i) => (i === null ? null : Math.max(0, i - 1)))}
         onNext={() => setOpenIndex((i) => (i === null ? null : Math.min(items.length - 1, i + 1)))}
+        onDownloaded={markDownloaded}
       />
 
       <TaskTray pokes={pokes} onJobsSettled={refreshView} />
