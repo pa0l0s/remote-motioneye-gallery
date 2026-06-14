@@ -32,3 +32,10 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host-gateway:host-gateway"
+    # Cap container stdout/stderr logs so they cannot fill the host root filesystem
+    # (Docker json-file logs live under /var/lib/docker on the NAS root disk).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,13 +18,18 @@ export async function generateImageThumb(src: string, out: string, width: number
 export async function generateVideoThumb(src: string, out: string, width: number): Promise<void> {
   await mkdir(dirname(out), { recursive: true });
   const frame = join(tmpdir(), `frame-${randomUUID()}.png`);
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg(src)
-      .on("end", () => resolve())
-      .on("error", reject)
-      .screenshots({ count: 1, timemarks: ["1"], filename: frame, folder: dirname(frame) });
-  });
-  await generateImageThumb(frame, out, width);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(src)
+        .on("end", () => resolve())
+        .on("error", reject)
+        .screenshots({ count: 1, timemarks: ["1"], filename: frame, folder: dirname(frame) });
+    });
+    await generateImageThumb(frame, out, width);
+  } finally {
+    // Never let extracted poster frames pile up in the container's /tmp (root FS).
+    await rm(frame, { force: true });
+  }
 }
 
 /**
