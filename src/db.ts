@@ -8,8 +8,8 @@ export const prisma = new PrismaClient();
  * instead of failing with "database is locked".
  */
 export async function initDb(): Promise<void> {
-  // journal_mode returns the resulting mode, so it must use queryRaw (not executeRaw).
+  // Several PRAGMAs return a row; queryRaw tolerates both result and no-result statements.
   await prisma.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
-  await prisma.$executeRawUnsafe("PRAGMA busy_timeout=10000;");
-  await prisma.$executeRawUnsafe("PRAGMA synchronous=NORMAL;");
+  await prisma.$queryRawUnsafe("PRAGMA busy_timeout=10000;");
+  await prisma.$queryRawUnsafe("PRAGMA synchronous=NORMAL;");
 }
