@@ -130,12 +130,12 @@ export function App() {
       </header>
 
       {/* ---- Timeline band ---- */}
-      <div className="relative z-10 h-24 border-b border-hairline bg-surface/30">
+      <div className="relative z-10 h-28 border-b border-hairline bg-surface/30">
         <div className="flex items-center justify-between px-6 pt-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted">
           <span>activity timeline</span>
           {activeBucket && <span className="text-amber">{fmtDate(`${activeBucket}T00:00:00Z`)}</span>}
         </div>
-        <div className="h-[72px]">
+        <div className="h-[88px]">
           <Timeline buckets={buckets} activeBucket={activeBucket} onPick={pickBucket} />
         </div>
       </div>

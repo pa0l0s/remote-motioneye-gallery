@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
@@ -47,7 +47,7 @@ export async function buildApp() {
   app.get("/health", async () => ({ status: "ok" }));
 
   // Resolve a camera's motionEyeId and ensure the file is local.
-  async function ensureFile(mf: MediaFile): Promise<string> {
+  async function ensureFile(mf: MediaFile, force = false): Promise<string> {
     const cam = await prisma.camera.findUnique({ where: { id: mf.cameraId } });
     return ensureDownloaded({
       prisma,
@@ -55,13 +55,17 @@ export async function buildApp() {
       client,
       mediaFile: mf,
       remoteCameraId: cam?.motionEyeId,
+      force,
     });
   }
   async function ensureThumbFor(mf: MediaFile): Promise<string> {
     const local = await ensureFile(mf);
     const cam = await prisma.camera.findUnique({ where: { id: mf.cameraId } });
     const thumb = thumbPathFor(cfg.configDir, cam?.name ?? "Camera", mf.remotePath);
-    return ensureThumb(local, thumb, mf.fileType as "image" | "video");
+    // Self-healing: if the local source is corrupt/0-byte, force a re-download and retry once.
+    return ensureThumb(local, thumb, mf.fileType as "image" | "video", undefined, () =>
+      ensureFile(mf, true),
+    );
   }
 
   registerCamerasRoute(app, client);
@@ -91,7 +95,15 @@ export async function buildApp() {
         startDate: today,
         emptyDayLimit: Number(process.env.INDEX_EMPTY_DAY_LIMIT ?? "30"),
         floorDate: process.env.INDEX_START_DATE,
-        existsOnDisk: (p) => existsSync(p),
+        // A 0-byte file counts as NOT downloaded; full image validation is lazy
+        // (at serve/thumbnail time), too expensive to do for every file here.
+        existsOnDisk: (p) => {
+          try {
+            return statSync(p).size > 0;
+          } catch {
+            return false;
+          }
+        },
       }),
     cfg.indexIntervalSeconds,
     (err) => app.log.error(err),

@@ -50,6 +50,44 @@ describe("ensureDownloaded", () => {
     expect(updated?.isDownloaded).toBe(true);
   });
 
+  it("re-downloads and replaces a 0-byte existing file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "store-"));
+    const local = join(dir, "Camera1/2026-06-13/a.jpg");
+    mkdirSync(dirname(local), { recursive: true });
+    writeFileSync(local, "");
+    const mf = await seedFile(local, true);
+    let called = false;
+    const client = {
+      downloadStream: async () => {
+        called = true;
+        return { statusCode: 200, body: Readable.from([Buffer.from("FRESHDATA")]) };
+      },
+    } as any;
+    await ensureDownloaded({ prisma, gate, client, mediaFile: mf });
+    expect(called).toBe(true);
+    expect(readFileSync(local).toString()).toBe("FRESHDATA");
+    const updated = await prisma.mediaFile.findUnique({ where: { id: mf.id } });
+    expect(updated?.isDownloaded).toBe(true);
+  });
+
+  it("overwrites an existing file when force is true", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "store-"));
+    const local = join(dir, "Camera1/2026-06-13/a.jpg");
+    mkdirSync(dirname(local), { recursive: true });
+    writeFileSync(local, "ORIGINAL");
+    const mf = await seedFile(local, true);
+    const client = {
+      downloadStream: async () => ({
+        statusCode: 200,
+        body: Readable.from([Buffer.from("REPLACED")]),
+      }),
+    } as any;
+    await ensureDownloaded({ prisma, gate, client, mediaFile: mf, force: true });
+    expect(readFileSync(local).toString()).toBe("REPLACED");
+    const updated = await prisma.mediaFile.findUnique({ where: { id: mf.id } });
+    expect(updated?.isDownloaded).toBe(true);
+  });
+
   it("does not overwrite an existing file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "store-"));
     const local = join(dir, "Camera1/2026-06-13/a.jpg");
