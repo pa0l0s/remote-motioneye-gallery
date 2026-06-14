@@ -6,7 +6,7 @@ import fastifyStatic from "@fastify/static";
 import type { MediaFile } from "@prisma/client";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
-import { prisma } from "./db.js";
+import { prisma, initDb } from "./db.js";
 import { MotionEyeClient } from "./motioneye/client.js";
 import { FetchGate } from "./remote/fetchGate.js";
 import { registerAuth } from "./auth/middleware.js";
@@ -21,6 +21,7 @@ import { runIndexOnce, startIndexLoop } from "./indexer/runner.js";
 export async function buildApp() {
   const cfg = loadConfig();
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  await initDb();
   await app.register(cookie);
 
   const client = new MotionEyeClient({
