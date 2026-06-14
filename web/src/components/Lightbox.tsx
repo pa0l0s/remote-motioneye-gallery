@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { MediaFile } from "../api";
 import { api } from "../api";
@@ -11,7 +11,69 @@ interface LightboxProps {
   onNext: () => void;
 }
 
+type Phase = "fetching" | "downloading" | "loaded" | "error";
+
+/**
+ * Downloads the full image via fetch so we can show progress. The backend pulls the
+ * frame from the remote camera first (slow over GSM) then streams it, so we stay in an
+ * indeterminate "fetching" state until the first byte arrives, then show byte progress.
+ */
+function useImageDownload(media: MediaFile | null) {
+  const [phase, setPhase] = useState<Phase>("fetching");
+  const [received, setReceived] = useState(0);
+  const [url, setUrl] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  const isImage = media?.fileType === "image";
+
+  useEffect(() => {
+    if (!media || !isImage) return;
+    const ac = new AbortController();
+    let objectUrl: string | null = null;
+    setPhase("fetching");
+    setReceived(0);
+    setUrl(null);
+
+    (async () => {
+      try {
+        const res = await fetch(api.fileUrl(media.id), { signal: ac.signal });
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            got += value.length;
+            setReceived(got);
+            setPhase("downloading");
+          }
+        }
+        if (got === 0) throw new Error("empty image");
+        objectUrl = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: "image/jpeg" }));
+        setUrl(objectUrl);
+        setPhase("loaded");
+      } catch (err) {
+        if (!ac.signal.aborted) setPhase("error");
+      }
+    })();
+
+    return () => {
+      ac.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [media?.id, isImage, attempt]);
+
+  return { phase, received, url, retry: () => setAttempt((a) => a + 1) };
+}
+
 export function Lightbox({ media, onClose, onPrev, onNext }: LightboxProps) {
+  const { phase, received, url, retry } = useImageDownload(media);
+  const total = media?.sizeBytes ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -40,15 +102,61 @@ export function Lightbox({ media, onClose, onPrev, onNext }: LightboxProps) {
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="overflow-hidden rounded-lg border border-hairline shadow-2xl">
+            <div className="relative grid min-h-[40vh] min-w-[40vw] place-items-center overflow-hidden rounded-lg border border-hairline bg-surface/40 shadow-2xl">
               {media.fileType === "video" ? (
                 <video src={api.fileUrl(media.id)} controls autoPlay className="max-h-[80vh]" />
               ) : (
-                <img
-                  src={api.fileUrl(media.id)}
-                  alt={media.remotePath}
-                  className="max-h-[80vh] w-auto object-contain"
-                />
+                <>
+                  {url && (
+                    <motion.img
+                      src={url}
+                      alt={media.remotePath}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.4 }}
+                      className="max-h-[80vh] w-auto object-contain"
+                    />
+                  )}
+
+                  {phase !== "loaded" && phase !== "error" && (
+                    <div className="flex w-72 flex-col items-center gap-3 p-8 text-center">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-hairline border-t-amber" />
+                      <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted">
+                        {media.isDownloaded ? "loading frame" : "fetching from camera over GSM"}
+                      </div>
+                      <div className="h-1 w-full overflow-hidden rounded-full bg-hairline">
+                        <div
+                          className={`h-full bg-amber transition-all duration-300 ${
+                            phase === "fetching" ? "w-1/4 animate-pulse" : ""
+                          }`}
+                          style={phase === "downloading" ? { width: `${pct}%` } : undefined}
+                        />
+                      </div>
+                      <div className="font-mono text-[10px] text-muted">
+                        {phase === "downloading"
+                          ? `${fmtBytes(received)} / ${fmtBytes(total)}  ·  ${pct}%`
+                          : "contacting remote, this can take a few seconds"}
+                      </div>
+                    </div>
+                  )}
+
+                  {phase === "error" && (
+                    <div className="flex w-72 flex-col items-center gap-3 p-8 text-center">
+                      <div className="font-mono text-xs uppercase tracking-[0.2em] text-amber">
+                        could not load frame
+                      </div>
+                      <div className="font-mono text-[10px] text-muted">
+                        the remote may be unreachable or the file is missing
+                      </div>
+                      <button
+                        onClick={retry}
+                        className="rounded-md border border-hairline px-4 py-1.5 font-mono text-xs text-fg transition hover:shadow-glow"
+                      >
+                        retry
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

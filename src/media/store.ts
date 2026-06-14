@@ -45,6 +45,12 @@ export async function ensureDownloaded(args: EnsureArgs): Promise<string> {
     await pipeline(body, createWriteStream(local));
   });
 
+  // A 200 with an empty body (the remote does this for a bad path) must not be cached as
+  // a success, or we serve a blank image and mark it downloaded.
+  if (isZeroByte(local)) {
+    throw new Error(`download ${mediaFile.remotePath} produced 0 bytes`);
+  }
+
   await prisma.mediaFile.update({ where: { id: mediaFile.id }, data: { isDownloaded: true } });
   return local;
 }

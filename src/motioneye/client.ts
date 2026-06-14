@@ -72,7 +72,10 @@ export class MotionEyeClient {
   /** Absolute signed URL to fetch the full file bytes. */
   fileUrl(kind: "picture" | "movie", cameraId: number, path: string): string {
     const verb = kind === "picture" ? "download" : "playback";
-    return this.signUrl("GET", `/${kind}/${cameraId}/${verb}/${path}`);
+    // The list API returns paths with a leading slash (e.g. "/2026-06-12/x.jpg"), but the
+    // download endpoint must NOT have a double slash after the verb or it returns 0 bytes.
+    const rel = path.replace(/^\/+/, "");
+    return this.signUrl("GET", `/${kind}/${cameraId}/${verb}/${rel}`);
   }
 
   /** Open a streaming GET for a media file. Caller consumes `body`. */
