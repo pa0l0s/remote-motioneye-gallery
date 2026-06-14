@@ -27,10 +27,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci --omit=dev
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY prisma ./prisma
+# Generate the Prisma client for THIS image's platform (avoids engine mismatch).
+RUN npx prisma generate
 COPY --from=build /app/dist ./dist
 COPY --from=web /web/dist ./web/dist
-COPY prisma ./prisma
 ENV STATIC_DIR=/app/web/dist
 EXPOSE 8762
 # Apply migrations to the (volume-backed) sqlite DB, then start.
