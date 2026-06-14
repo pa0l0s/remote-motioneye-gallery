@@ -8,7 +8,8 @@ export const prisma = new PrismaClient();
  * instead of failing with "database is locked".
  */
 export async function initDb(): Promise<void> {
-  await prisma.$executeRawUnsafe("PRAGMA journal_mode=WAL;");
+  // journal_mode returns the resulting mode, so it must use queryRaw (not executeRaw).
+  await prisma.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
   await prisma.$executeRawUnsafe("PRAGMA busy_timeout=10000;");
   await prisma.$executeRawUnsafe("PRAGMA synchronous=NORMAL;");
 }
