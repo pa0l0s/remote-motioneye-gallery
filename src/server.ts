@@ -97,29 +97,46 @@ export async function buildApp() {
   }
 
   // Background indexing (non-blocking).
-  const today = new Date().toISOString().slice(0, 10);
-  startIndexLoop(
-    () =>
-      runIndexOnce({
-        prisma,
-        client,
-        mediaRoot: cfg.mediaRoot,
-        startDate: today,
-        emptyDayLimit: Number(process.env.INDEX_EMPTY_DAY_LIMIT ?? "30"),
-        floorDate: process.env.INDEX_START_DATE,
-        // A 0-byte file counts as NOT downloaded; full image validation is lazy
-        // (at serve/thumbnail time), too expensive to do for every file here.
-        existsOnDisk: (p) => {
-          try {
-            return statSync(p).size > 0;
-          } catch {
-            return false;
-          }
-        },
-      }),
-    cfg.indexIntervalSeconds,
-    (err) => app.log.error(err),
-  );
+  // "today" must be computed PER RUN (not at boot) so the indexer advances to new
+  // calendar days. Periodic cycles scan only a recent window (today back N days) so they
+  // are cheap on GSM and always pick up the current day + newly-added recent files. A
+  // full historical backfill runs once, only when the DB is empty (fresh deploy).
+  const isoToday = () => new Date().toISOString().slice(0, 10);
+  const isoDaysAgo = (n: number) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+  const emptyDayLimit = Number(process.env.INDEX_EMPTY_DAY_LIMIT ?? "30");
+  const recentDays = Number(process.env.INDEX_RECENT_DAYS ?? "3");
+  const existsOnDisk = (p: string) => {
+    try {
+      return statSync(p).size > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  const indexCycle = (recentOnly: boolean) =>
+    runIndexOnce({
+      prisma,
+      client,
+      mediaRoot: cfg.mediaRoot,
+      startDate: isoToday(),
+      emptyDayLimit,
+      // Recent cycles stop at today-N; the one-time backfill honours INDEX_START_DATE.
+      floorDate: recentOnly ? isoDaysAgo(recentDays) : process.env.INDEX_START_DATE,
+      existsOnDisk,
+    });
+
+  void (async () => {
+    try {
+      if ((await prisma.mediaFile.count()) === 0) await indexCycle(false); // full backfill once
+    } catch (err) {
+      app.log.error(err);
+    }
+    startIndexLoop(() => indexCycle(true), cfg.indexIntervalSeconds, (err) => app.log.error(err));
+  })();
 
   return app;
 }

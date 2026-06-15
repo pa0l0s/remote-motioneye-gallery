@@ -23,6 +23,8 @@ services:
       MEDIA_ROOT: "/media"
       REMOTE_CONCURRENCY: "${REMOTE_CONCURRENCY:-1}"
       INDEX_EMPTY_DAY_LIMIT: "${INDEX_EMPTY_DAY_LIMIT:-30}"
+      # Periodic cycles re-scan only the last N days (cheap; always catches the new day).
+      INDEX_RECENT_DAYS: "${INDEX_RECENT_DAYS:-3}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"
