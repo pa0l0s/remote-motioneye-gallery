@@ -10,6 +10,15 @@ export interface AppConfig {
   indexIntervalSeconds: number;
   requestTimeoutMs: number;
   maxRetries: number;
+  activity: {
+    enabled: boolean;
+    intervalSeconds: number;
+    batch: number;
+    downscale: number;
+    pixelThreshold: number;
+    scoreThreshold: number;
+    maxGapSeconds: number;
+  };
 }
 
 function required(env: Record<string, string | undefined>, key: string): string {
@@ -31,5 +40,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     indexIntervalSeconds: Number(env.INDEX_INTERVAL_SECONDS ?? "900"),
     requestTimeoutMs: Number(env.REQUEST_TIMEOUT_MS ?? "30000"),
     maxRetries: Number(env.MAX_RETRIES ?? "5"),
+    activity: {
+      enabled: (env.ACTIVITY_DETECTION_ENABLED ?? "true") !== "false",
+      intervalSeconds: Number(env.ACTIVITY_SCAN_INTERVAL_SECONDS ?? "120"),
+      batch: Number(env.ACTIVITY_SCAN_BATCH ?? "500"),
+      downscale: Number(env.ACTIVITY_DOWNSCALE ?? "64"),
+      pixelThreshold: Number(env.ACTIVITY_PIXEL_THRESHOLD ?? "25"),
+      scoreThreshold: Number(env.ACTIVITY_SCORE_THRESHOLD ?? "0.02"),
+      maxGapSeconds: Number(env.ACTIVITY_MAX_GAP_SECONDS ?? "900"),
+    },
   };
 }

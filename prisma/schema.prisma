@@ -32,8 +32,14 @@ model MediaFile {
   thumbReady    Boolean  @default(false)
   createdAt     DateTime @default(now())
 
+  // Background activity detection (local-only frame-differencing).
+  activityScore     Float?    // 0..1 fraction of frame changed vs prev; null = unscanned / no neighbor
+  hasActivity       Boolean   @default(false) // activityScore > threshold
+  activityScannedAt DateTime? // null = not yet scanned
+
   @@unique([cameraId, remotePath])
   @@index([cameraId, timestamp])
+  @@index([cameraId, hasActivity, timestamp])
 }
 
 model IndexCursor {

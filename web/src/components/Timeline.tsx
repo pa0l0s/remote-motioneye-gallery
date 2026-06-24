@@ -112,20 +112,30 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
             {buckets.map((b) => {
               const h = 12 + (b.count / max) * 100;
               const active = b.bucket === activeBucket;
+              const activityRatio = b.count > 0 ? b.activityCount / b.count : 0;
               return (
                 <button
                   key={b.bucket}
                   onClick={() => onBarClick(b.bucket)}
-                  title={`${b.bucket} · ${b.count} frames`}
+                  title={`${b.bucket} · ${b.count} frames · ${b.activityCount} with activity`}
                   className="group relative flex h-full shrink-0 flex-col items-center justify-end"
                   style={{ width: `${BAR_WIDTH}px` }}
                 >
                   <span
-                    className={`w-full rounded-sm transition-all duration-200 ${
-                      active ? "bg-amber shadow-glow" : "bg-teal/30 group-hover:bg-amber/70"
+                    className={`relative w-full overflow-hidden rounded-sm transition-all duration-200 ${
+                      active ? "bg-amber shadow-glow" : "bg-teal/30 group-hover:bg-teal/50"
                     }`}
                     style={{ height: `${h}%` }}
-                  />
+                  >
+                    {/* activity heat: amber fill from the bottom, proportional to the day's
+                        activity ratio (hidden on the active bar, which is already amber). */}
+                    {!active && activityRatio > 0 && (
+                      <span
+                        className="absolute bottom-0 left-0 w-full bg-amber/80"
+                        style={{ height: `${Math.max(8, activityRatio * 100)}%` }}
+                      />
+                    )}
+                  </span>
                 </button>
               );
             })}

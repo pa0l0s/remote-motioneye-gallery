@@ -28,6 +28,7 @@ export function registerMediaRoutes(app: FastifyInstance, deps: MediaDeps): void
     const cur = q.cursor ? decodeCursor(q.cursor) : null;
 
     const where: Record<string, unknown> = { cameraId };
+    if (q.activityOnly === "true") where.hasActivity = true;
     if (q.from || q.to) {
       where.timestamp = {
         ...(q.from ? { gte: new Date(q.from) } : {}),

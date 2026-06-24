@@ -20,14 +20,22 @@ export function registerTimelineRoutes(app: FastifyInstance, deps: TimelineDeps)
     const fmt = BUCKET_FMT[q.bucket ?? "day"];
     if (!fmt) return reply.code(400).send({ error: "bad bucket" });
 
-    const rows = await prisma.$queryRaw<Array<{ bucket: string; count: bigint }>>(Prisma.sql`
-      SELECT strftime(${fmt}, timestamp / 1000, 'unixepoch') AS bucket, COUNT(*) AS count
+    const rows = await prisma.$queryRaw<
+      Array<{ bucket: string; count: bigint; activityCount: bigint }>
+    >(Prisma.sql`
+      SELECT strftime(${fmt}, timestamp / 1000, 'unixepoch') AS bucket,
+             COUNT(*) AS count,
+             SUM(CASE WHEN hasActivity THEN 1 ELSE 0 END) AS activityCount
       FROM MediaFile
       WHERE cameraId = ${cameraId}
       GROUP BY bucket
       ORDER BY bucket ASC
     `);
-    return rows.map((r) => ({ bucket: r.bucket, count: Number(r.count) }));
+    return rows.map((r) => ({
+      bucket: r.bucket,
+      count: Number(r.count),
+      activityCount: Number(r.activityCount),
+    }));
   });
 
   app.get("/api/cameras/:id/seek", async (req) => {

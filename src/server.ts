@@ -20,6 +20,8 @@ import { thumbPathFor } from "./indexer/mediaPaths.js";
 import { runIndexOnce, startIndexLoop } from "./indexer/runner.js";
 import { DownloadManager } from "./downloads/manager.js";
 import { registerDownloadRoutes } from "./routes/downloads.js";
+import { runActivityScanOnce, type ScanControl } from "./activity/scanner.js";
+import { registerActivityRoutes } from "./routes/activity.js";
 
 export async function buildApp() {
   const cfg = loadConfig();
@@ -79,10 +81,13 @@ export async function buildApp() {
 
   const downloads = new DownloadManager(prisma, gate, client);
 
+  const scanControl: ScanControl = { paused: false, scanning: false };
+
   registerCamerasRoute(app, client);
   registerMediaRoutes(app, { prisma, ensureFile, ensureThumbFor });
   registerTimelineRoutes(app, { prisma });
   registerDownloadRoutes(app, { prisma, manager: downloads });
+  registerActivityRoutes(app, { prisma, control: scanControl, enabled: cfg.activity.enabled });
 
   // Serve the built SPA (web/dist) with a history-API fallback.
   const staticDir = resolve(process.env.STATIC_DIR ?? "web/dist");
@@ -137,6 +142,32 @@ export async function buildApp() {
     }
     startIndexLoop(() => indexCycle(true), cfg.indexIntervalSeconds, (err) => app.log.error(err));
   })();
+
+  // Background activity detection (local-only frame-differencing). Runs on its own cadence,
+  // independent of indexing, and only touches frames already on disk (no remote/GSM fetch).
+  if (cfg.activity.enabled) {
+    const scanCycle = async () => {
+      if (scanControl.paused) return;
+      scanControl.scanning = true;
+      try {
+        const { scanned, flagged } = await runActivityScanOnce({
+          prisma,
+          control: scanControl,
+          opts: {
+            batch: cfg.activity.batch,
+            downscale: cfg.activity.downscale,
+            pixelThreshold: cfg.activity.pixelThreshold,
+            scoreThreshold: cfg.activity.scoreThreshold,
+            maxGapSeconds: cfg.activity.maxGapSeconds,
+          },
+        });
+        if (scanned > 0) app.log.info({ scanned, flagged }, "activity scan cycle");
+      } finally {
+        scanControl.scanning = false;
+      }
+    };
+    startIndexLoop(scanCycle, cfg.activity.intervalSeconds, (err) => app.log.error(err));
+  }
 
   return app;
 }

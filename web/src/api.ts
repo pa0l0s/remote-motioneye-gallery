@@ -12,6 +12,8 @@ export interface MediaFile {
   sizeBytes: number | null;
   isDownloaded: boolean;
   thumbReady: boolean;
+  hasActivity: boolean;
+  activityScore: number | null;
 }
 
 export interface MediaPage {
@@ -22,6 +24,17 @@ export interface MediaPage {
 export interface HistogramBucket {
   bucket: string;
   count: number;
+  activityCount: number;
+}
+
+export interface ScanStatus {
+  enabled: boolean;
+  paused: boolean;
+  scanning: boolean;
+  totalLocalImages: number;
+  scanned: number;
+  pending: number;
+  withActivity: number;
 }
 
 export interface DownloadJob {
@@ -53,12 +66,19 @@ export const api = {
     ),
   media: (
     cameraId: number,
-    opts: { cursor?: string | null; limit?: number; from?: string; to?: string } = {},
+    opts: {
+      cursor?: string | null;
+      limit?: number;
+      from?: string;
+      to?: string;
+      activityOnly?: boolean;
+    } = {},
   ) => {
     const p = new URLSearchParams({ cameraId: String(cameraId), limit: String(opts.limit ?? 150) });
     if (opts.cursor) p.set("cursor", opts.cursor);
     if (opts.from) p.set("from", opts.from);
     if (opts.to) p.set("to", opts.to);
+    if (opts.activityOnly) p.set("activityOnly", "true");
     return getJson<MediaPage>(`/api/media?${p.toString()}`);
   },
   thumbUrl: (id: number) => `/api/media/${id}/thumb`,
@@ -73,4 +93,8 @@ export const api = {
   listDownloads: () => getJson<DownloadJob[]>("/api/downloads"),
   cancelDownload: (id: string) =>
     fetch(`/api/downloads/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
+
+  activityStatus: () => getJson<ScanStatus>("/api/activity/status"),
+  pauseScan: () => fetch("/api/activity/pause", { method: "POST" }).then((r) => r.json()),
+  resumeScan: () => fetch("/api/activity/resume", { method: "POST" }).then((r) => r.json()),
 };

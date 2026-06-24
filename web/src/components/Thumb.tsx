@@ -44,7 +44,11 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
     <div
       ref={ref}
       className={`group relative aspect-[4/3] overflow-hidden rounded-md border bg-surface ${
-        selected ? "border-amber shadow-glow" : "border-hairline"
+        selected
+          ? "border-amber shadow-glow"
+          : media.hasActivity
+            ? "border-amber/40"
+            : "border-hairline"
       }`}
     >
       <button onClick={() => onOpen(media)} className="absolute inset-0 h-full w-full outline-none">
@@ -110,6 +114,28 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
         }`}
         title={local ? "cached locally" : "remote (not downloaded)"}
       />
+
+      {/* activity-detected badge */}
+      {media.hasActivity && (
+        <span
+          className="pointer-events-none absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1 rounded-sm bg-amber/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink shadow-glow"
+          title={
+            media.activityScore != null
+              ? `activity detected (${(media.activityScore * 100).toFixed(1)}% changed)`
+              : "activity detected"
+          }
+        >
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <circle cx="12" cy="12" r="3" fill="currentColor" />
+          </svg>
+          activity
+        </span>
+      )}
     </div>
   );
 }

@@ -25,6 +25,12 @@ services:
       INDEX_EMPTY_DAY_LIMIT: "${INDEX_EMPTY_DAY_LIMIT:-30}"
       # Periodic cycles re-scan only the last N days (cheap; always catches the new day).
       INDEX_RECENT_DAYS: "${INDEX_RECENT_DAYS:-3}"
+      # Background activity detection (local-only frame-differencing; no remote/GSM fetch).
+      ACTIVITY_DETECTION_ENABLED: "${ACTIVITY_DETECTION_ENABLED:-true}"
+      ACTIVITY_SCAN_INTERVAL_SECONDS: "${ACTIVITY_SCAN_INTERVAL_SECONDS:-120}"
+      ACTIVITY_SCAN_BATCH: "${ACTIVITY_SCAN_BATCH:-500}"
+      ACTIVITY_SCORE_THRESHOLD: "${ACTIVITY_SCORE_THRESHOLD:-0.02}"
+      ACTIVITY_PIXEL_THRESHOLD: "${ACTIVITY_PIXEL_THRESHOLD:-25}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"
