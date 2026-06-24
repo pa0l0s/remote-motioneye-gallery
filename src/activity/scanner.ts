@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { isValidImage } from "../media/validate.js";
-import { loadGrayBuffer, scoreBuffers, type DiffOptions } from "./diff.js";
+import { loadFrame, scoreFrames, isModeSwitch, type DiffOptions, type Frame } from "./diff.js";
 
 export interface ScanOptions extends DiffOptions {
   /** Max frames to score+write per cycle (keeps NAS CPU bounded). */
@@ -14,9 +14,10 @@ export interface ScanOptions extends DiffOptions {
 export const DEFAULT_SCAN: ScanOptions = {
   downscale: 64,
   pixelThreshold: 25,
+  colorThreshold: 8,
   batch: 500,
   maxGapSeconds: 900,
-  scoreThreshold: 0.02,
+  scoreThreshold: 0.04,
 };
 
 /** Mutable control shared with the HTTP layer (pause toggle + a "currently running" flag). */
@@ -64,9 +65,9 @@ export async function runActivityScanOnce(args: {
     });
     if (!first) continue;
 
-    // Seed the rolling buffer with the immediately-preceding local frame (if any), and start
+    // Seed the rolling frame with the immediately-preceding local frame (if any), and start
     // the forward walk strictly after it — which includes `first` as the first frame scored.
-    let prevBuf: Buffer | null = null;
+    let prevFrame: Frame | null = null;
     let prevTs = 0;
     let cursorTs = first.timestamp.getTime() - 1;
     let cursorId = Number.MAX_SAFE_INTEGER;
@@ -86,10 +87,10 @@ export async function runActivityScanOnce(args: {
       cursorId = pred.id;
       if (await isValid(pred.localPath)) {
         try {
-          prevBuf = await loadGrayBuffer(pred.localPath, opts.downscale);
+          prevFrame = await loadFrame(pred.localPath, opts.downscale);
           prevTs = pred.timestamp.getTime();
         } catch {
-          prevBuf = null;
+          prevFrame = null;
         }
       }
     }
@@ -116,23 +117,24 @@ export async function runActivityScanOnce(args: {
         cursorTs = f.timestamp.getTime();
         cursorId = f.id;
 
-        let currBuf: Buffer | null = null;
+        let currFrame: Frame | null = null;
         if (await isValid(f.localPath)) {
           try {
-            currBuf = await loadGrayBuffer(f.localPath, opts.downscale);
+            currFrame = await loadFrame(f.localPath, opts.downscale);
           } catch {
-            currBuf = null;
+            currFrame = null;
           }
         }
 
         // Only persist results for frames not yet scanned; already-scanned frames are loaded
         // purely to keep the rolling-neighbor chain intact.
         if (f.activityScannedAt === null) {
-          const gapOk = prevBuf !== null && f.timestamp.getTime() - prevTs <= opts.maxGapSeconds * 1000;
+          const gapOk =
+            prevFrame !== null && f.timestamp.getTime() - prevTs <= opts.maxGapSeconds * 1000;
           let score: number | null = null;
           let active = false;
-          if (gapOk && currBuf) {
-            score = scoreBuffers(prevBuf as Buffer, currBuf, opts);
+          if (gapOk && currFrame && !isModeSwitch(prevFrame as Frame, currFrame, opts)) {
+            score = scoreFrames(prevFrame as Frame, currFrame, opts);
             active = score > opts.scoreThreshold;
           }
           await prisma.mediaFile.update({
@@ -144,8 +146,8 @@ export async function runActivityScanOnce(args: {
           written++;
         }
 
-        if (currBuf) {
-          prevBuf = currBuf;
+        if (currFrame) {
+          prevFrame = currFrame;
           prevTs = f.timestamp.getTime();
         }
         if (written >= opts.batch) break walk;

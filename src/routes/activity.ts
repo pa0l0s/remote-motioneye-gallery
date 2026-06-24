@@ -43,4 +43,14 @@ export function registerActivityRoutes(app: FastifyInstance, deps: ActivityDeps)
     control.paused = false;
     return { paused: false };
   });
+
+  // Clear all activity results so the scanner re-processes from scratch — used after tuning
+  // thresholds / detection logic so the change applies to already-scanned frames too.
+  app.post("/api/activity/rescan", async () => {
+    const res = await prisma.mediaFile.updateMany({
+      where: { activityScannedAt: { not: null } },
+      data: { activityScannedAt: null, hasActivity: false, activityScore: null },
+    });
+    return { reset: res.count };
+  });
 }

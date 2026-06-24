@@ -157,6 +157,7 @@ export async function buildApp() {
             batch: cfg.activity.batch,
             downscale: cfg.activity.downscale,
             pixelThreshold: cfg.activity.pixelThreshold,
+            colorThreshold: cfg.activity.colorThreshold,
             scoreThreshold: cfg.activity.scoreThreshold,
             maxGapSeconds: cfg.activity.maxGapSeconds,
           },

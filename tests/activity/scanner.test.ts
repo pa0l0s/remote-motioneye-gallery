@@ -133,4 +133,32 @@ describe("runActivityScanOnce", () => {
     const second = await runActivityScanOnce({ prisma });
     expect(second.scanned).toBe(0); // nothing left to scan
   });
+
+  it("does not flag a day(color)->night(grayscale) mode switch", async () => {
+    const cam = await prisma.camera.create({ data: { motionEyeId: 3, name: "Cam3" } });
+    const dayPath = join(dir, "day.png");
+    const nightPath = join(dir, "night.png");
+    await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 150, g: 60, b: 40 } } })
+      .png()
+      .toFile(dayPath);
+    await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 70, g: 70, b: 70 } } })
+      .png()
+      .toFile(nightPath);
+    const base = Date.now();
+    for (const [i, p] of [dayPath, nightPath].entries()) {
+      await prisma.mediaFile.create({
+        data: {
+          cameraId: cam.id,
+          fileType: "image",
+          remotePath: `/n/${i}.jpg`,
+          localPath: p,
+          timestamp: new Date(base + i * 60_000),
+          isDownloaded: true,
+        },
+      });
+    }
+    const res = await runActivityScanOnce({ prisma });
+    expect(res.scanned).toBe(2);
+    expect(res.flagged).toBe(0); // the color->gray switch must not count as activity
+  });
 });

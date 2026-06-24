@@ -29,8 +29,11 @@ services:
       ACTIVITY_DETECTION_ENABLED: "${ACTIVITY_DETECTION_ENABLED:-true}"
       ACTIVITY_SCAN_INTERVAL_SECONDS: "${ACTIVITY_SCAN_INTERVAL_SECONDS:-120}"
       ACTIVITY_SCAN_BATCH: "${ACTIVITY_SCAN_BATCH:-500}"
-      ACTIVITY_SCORE_THRESHOLD: "${ACTIVITY_SCORE_THRESHOLD:-0.02}"
+      # Sensitivity: fraction of frame changed to flag (higher = less sensitive); per-pixel
+      # delta; and the color/grayscale boundary used to ignore day<->night IR switches.
+      ACTIVITY_SCORE_THRESHOLD: "${ACTIVITY_SCORE_THRESHOLD:-0.04}"
       ACTIVITY_PIXEL_THRESHOLD: "${ACTIVITY_PIXEL_THRESHOLD:-25}"
+      ACTIVITY_COLOR_THRESHOLD: "${ACTIVITY_COLOR_THRESHOLD:-8}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"

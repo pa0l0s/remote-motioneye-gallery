@@ -16,6 +16,7 @@ export interface AppConfig {
     batch: number;
     downscale: number;
     pixelThreshold: number;
+    colorThreshold: number;
     scoreThreshold: number;
     maxGapSeconds: number;
   };
@@ -46,7 +47,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       batch: Number(env.ACTIVITY_SCAN_BATCH ?? "500"),
       downscale: Number(env.ACTIVITY_DOWNSCALE ?? "64"),
       pixelThreshold: Number(env.ACTIVITY_PIXEL_THRESHOLD ?? "25"),
-      scoreThreshold: Number(env.ACTIVITY_SCORE_THRESHOLD ?? "0.02"),
+      colorThreshold: Number(env.ACTIVITY_COLOR_THRESHOLD ?? "8"),
+      scoreThreshold: Number(env.ACTIVITY_SCORE_THRESHOLD ?? "0.04"),
       maxGapSeconds: Number(env.ACTIVITY_MAX_GAP_SECONDS ?? "900"),
     },
   };
