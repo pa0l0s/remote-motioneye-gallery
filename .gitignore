@@ -26,3 +26,6 @@ dev.db*
 # --- Misc ---
 .DS_Store
 *.log
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
