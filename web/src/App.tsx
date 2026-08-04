@@ -2,12 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion } from "motion/react";
 import { api } from "./api";
-import type { Camera, HistogramBucket, MediaFile } from "./api";
+import type { AiStatus, Camera, HistogramBucket, MediaFile } from "./api";
 import { Thumb } from "./components/Thumb";
 import { Timeline } from "./components/Timeline";
 import { Lightbox } from "./components/Lightbox";
 import { TaskTray } from "./components/TaskTray";
 import { ScanStatusTray } from "./components/ScanStatusTray";
+import { DetectionFilter } from "./components/DetectionFilter";
 import { fmtDate } from "./lib/format";
 
 const GAP = 8;
@@ -25,7 +26,8 @@ export function App() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [pokes, setPokes] = useState(0);
-  const [activityOnly, setActivityOnly] = useState(false);
+  const [detections, setDetections] = useState<string[]>([]);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -40,13 +42,13 @@ export function App() {
   const loadFirstPage = useCallback(
     async (cam: Camera, from?: string) => {
       setLoading(true);
-      const page = await api.media(cam.id, { from, limit: 150, activityOnly });
+      const page = await api.media(cam.id, { from, limit: 150, detections });
       setItems(page.items);
       setCursor(page.nextCursor);
       setLoading(false);
       scrollRef.current?.scrollTo({ top: 0 });
     },
-    [activityOnly],
+    [detections],
   );
 
   useEffect(() => {
@@ -58,11 +60,11 @@ export function App() {
   const loadMore = useCallback(async () => {
     if (!camera || !cursor || loading) return;
     setLoading(true);
-    const page = await api.media(camera.id, { cursor, limit: 150, activityOnly });
+    const page = await api.media(camera.id, { cursor, limit: 150, detections });
     setItems((prev) => [...prev, ...page.items]);
     setCursor(page.nextCursor);
     setLoading(false);
-  }, [camera, cursor, loading, activityOnly]);
+  }, [camera, cursor, loading, detections]);
 
   // Re-fetch the current view (used after a download batch settles so cached flips on).
   const refreshView = useCallback(() => {
@@ -140,11 +142,9 @@ export function App() {
     [],
   );
 
-  const toggleActivityOnly = () => {
-    setActivityOnly((v) => !v);
-    setCurrentFrom(undefined);
-    setActiveBucket(undefined);
-  };
+  useEffect(() => {
+    void api.aiStatus().then(setAiStatus).catch(() => setAiStatus(null));
+  }, [pokes]);
 
   const open = (m: MediaFile) => setOpenIndex(items.findIndex((x) => x.id === m.id));
   const total = buckets.reduce((s, b) => s + b.count, 0);
@@ -165,25 +165,16 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            onClick={toggleActivityOnly}
-            title="Show only frames where activity was detected"
-            className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] transition ${
-              activityOnly
-                ? "border-amber bg-amber/10 text-amber shadow-glow"
-                : "border-hairline text-muted hover:text-fg"
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <circle cx="12" cy="12" r="3" fill="currentColor" />
-            </svg>
-            activity{totalActivity > 0 ? ` · ${totalActivity.toLocaleString()}` : ""}
-          </button>
+          <DetectionFilter
+            selected={detections}
+            onChange={setDetections}
+            counts={{
+              motion: totalActivity,
+              people: aiStatus?.withPeople ?? 0,
+              animal: aiStatus?.withAnimals ?? 0,
+            }}
+            aiAvailable={(aiStatus?.scanned ?? 0) > 0}
+          />
           {cameras.length > 1 && (
             <select
               value={camera?.id}
