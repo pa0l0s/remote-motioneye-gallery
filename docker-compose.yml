@@ -47,8 +47,12 @@ services:
       AI_WEATHER_PROMPT_VERSION: "${AI_WEATHER_PROMPT_VERSION:-weather-v1}"
       AI_WEATHER_MIN_GAP_SECONDS: "${AI_WEATHER_MIN_GAP_SECONDS:-600}"
       AI_BATCH: "${AI_BATCH:-200}"
-      AI_REQUEST_TIMEOUT_MS: "${AI_REQUEST_TIMEOUT_MS:-60000}"
+      AI_REQUEST_TIMEOUT_MS: "${AI_REQUEST_TIMEOUT_MS:-120000}"
       AI_MAX_FAILURES: "${AI_MAX_FAILURES:-5}"
+      # Loop B's own night/IR gate, deliberately separate from ACTIVITY_COLOR_THRESHOLD
+      # above: retuning loop A's motion-detection sensitivity must never silently change
+      # which frames loop B calls "night" (and therefore weather-scans).
+      AI_NIGHT_COLOR_THRESHOLD: "${AI_NIGHT_COLOR_THRESHOLD:-8}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"

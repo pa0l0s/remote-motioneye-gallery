@@ -33,6 +33,14 @@ export interface AppConfig {
     batch: number;
     requestTimeoutMs: number;
     maxFailures: number;
+    /**
+     * Own night/IR gate for loop B, separate from activity.colorThreshold. Retuning loop
+     * A's motion-detection sensitivity must never silently change which frames loop B
+     * calls "night" (and therefore weather-scans, and matches the `night` filter) — the
+     * two passes are independent products and this is the one place a loop-A action used
+     * to leak into loop-B output.
+     */
+    nightColorThreshold: number;
   };
 }
 
@@ -76,8 +84,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       weatherPromptVersion: env.AI_WEATHER_PROMPT_VERSION ?? "weather-v1",
       weatherMinGapSeconds: Number(env.AI_WEATHER_MIN_GAP_SECONDS ?? "600"),
       batch: Number(env.AI_BATCH ?? "200"),
-      requestTimeoutMs: Number(env.AI_REQUEST_TIMEOUT_MS ?? "60000"),
+      requestTimeoutMs: Number(env.AI_REQUEST_TIMEOUT_MS ?? "120000"),
       maxFailures: Number(env.AI_MAX_FAILURES ?? "5"),
+      nightColorThreshold: Number(env.AI_NIGHT_COLOR_THRESHOLD ?? "8"),
     },
   };
 }

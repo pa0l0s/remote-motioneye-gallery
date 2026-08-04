@@ -39,6 +39,17 @@ describe("loadConfig — extended pass", () => {
     expect(cfg.ai.imageWidth).toBe(1024);
     expect(cfg.ai.weatherMinGapSeconds).toBe(600);
     expect(cfg.ai.model).toBe("qwen/qwen3-vl-8b");
+    // 60s sat inside the 29-36s contended-GPU range measured on the owner's workstation,
+    // tripping the timeout on an ordinary frame.
+    expect(cfg.ai.requestTimeoutMs).toBe(120000);
+    // Loop B's own night gate — must default independently of ACTIVITY_COLOR_THRESHOLD.
+    expect(cfg.ai.nightColorThreshold).toBe(8);
+  });
+
+  it("reads AI_NIGHT_COLOR_THRESHOLD independently of ACTIVITY_COLOR_THRESHOLD", () => {
+    const cfg = loadConfig({ ...base, AI_NIGHT_COLOR_THRESHOLD: "12", ACTIVITY_COLOR_THRESHOLD: "3" });
+    expect(cfg.ai.nightColorThreshold).toBe(12);
+    expect(cfg.activity.colorThreshold).toBe(3);
   });
 
   it("enables it only on an explicit true", () => {

@@ -108,7 +108,7 @@ export function startAiRunner(args: {
               imageWidth: cfg.ai.imageWidth,
               weatherMinGapSeconds: cfg.ai.weatherMinGapSeconds,
               batch: cfg.ai.batch,
-              colorThreshold: cfg.activity.colorThreshold,
+              colorThreshold: cfg.ai.nightColorThreshold,
               maxFailures: cfg.ai.maxFailures,
             },
             deps: {
