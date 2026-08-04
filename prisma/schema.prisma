@@ -37,9 +37,32 @@ model MediaFile {
   hasActivity       Boolean   @default(false) // activityScore > threshold
   activityScannedAt DateTime? // null = not yet scanned
 
+  // ---- Extended pass: semantic labels from a local vision model (loop B). ----
+  // Loop A never reads or writes anything below this line.
+  aiScannedAt     DateTime?
+  aiModel         String? // e.g. "qwen/qwen3-vl-8b" — what produced this row
+  aiPromptVersion String? // e.g. "semantics-v1" — bump to re-scan without wiping
+  aiPeopleCount   Int?
+  aiAnimals       String? // raw JSON array as returned by the model
+  aiAnimalKinds   String? // normalised, comma-delimited AND comma-wrapped: ",bird,dog,"
+  aiLatencyMs     Int?
+  aiFailures      Int       @default(0)
+
+  weatherScannedAt     DateTime?
+  weatherPromptVersion String?
+  weatherVisibility    String? // clear | slight_haze | fog | dense_fog
+  weatherPrecipitation String? // none | rain | heavy_rain | snow
+  weatherSnowOnGround  Boolean?
+
+  // Classical, deterministic — computed locally, never asked of the model.
+  isNightIr Boolean?
+
   @@unique([cameraId, remotePath])
   @@index([cameraId, timestamp])
   @@index([cameraId, hasActivity, timestamp])
+  @@index([cameraId, aiScannedAt])
+  @@index([cameraId, aiPeopleCount, timestamp])
+  @@index([cameraId, weatherVisibility, timestamp])
 }
 
 model IndexCursor {
