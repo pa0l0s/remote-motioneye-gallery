@@ -39,6 +39,9 @@ export async function aiRunnerTick(state: AiRunnerState, deps: TickDeps): Promis
     state.control.modelLoaded = await deps.probe();
     state.backlogEmpty = false;
     if (!state.control.modelLoaded) return;
+    // The model is back: a stale error from a past outage would otherwise pin
+    // /api/ai/status to "failed" long after recovery.
+    state.control.lastError = null;
   }
 
   state.control.scanning = true;
@@ -47,9 +50,14 @@ export async function aiRunnerTick(state: AiRunnerState, deps: TickDeps): Promis
     if (res.stopped === "unavailable") {
       state.control.modelLoaded = false;
       state.lastProbeMs = deps.now; // do not hammer a host that just went away
-    } else if (res.stopped === "empty") {
-      state.backlogEmpty = true;
-      state.lastProbeMs = deps.now;
+    } else {
+      // A batch (or an empty backlog) that completes without throwing means the model
+      // answered fine this tick, so any earlier error no longer describes the present.
+      state.control.lastError = null;
+      if (res.stopped === "empty") {
+        state.backlogEmpty = true;
+        state.lastProbeMs = deps.now;
+      }
     }
   } finally {
     state.control.scanning = false;
@@ -111,8 +119,10 @@ export function startAiRunner(args: {
       control.lastError = (e as Error).message;
       log("ai runner tick failed", e);
     }
-    // Short cadence: the tick itself decides whether to probe, scan or idle.
-    timer = setTimeout(() => void loop(), 5000);
+    // Short cadence: the tick itself decides whether to probe, scan or idle. Guarded by
+    // `stopped` so an in-flight tick that finishes just after stop() was called does not
+    // schedule one more timer than the caller asked for.
+    if (!stopped) timer = setTimeout(() => void loop(), 5000);
   }
 
   void loop();

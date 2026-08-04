@@ -32,6 +32,13 @@ describe("aiRunnerTick", () => {
     await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_001_000 });
     expect(probe).toHaveBeenCalledOnce(); // not re-probed
     expect(scan).toHaveBeenCalledTimes(2);
+
+    // third tick, well past the probe interval: still no re-probe while continuously
+    // loaded — this is what distinguishes "scan continuously" from "scan on a timer that
+    // just hasn't fired yet".
+    await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_400_000 });
+    expect(probe).toHaveBeenCalledOnce();
+    expect(scan).toHaveBeenCalledTimes(3);
   });
 
   it("stops scanning and returns to probing when the model disappears mid-batch", async () => {
