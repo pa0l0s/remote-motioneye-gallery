@@ -4,78 +4,137 @@
  * cannot silently degrade detection.
  *
  *   npm run ai:eval
+ *
+ * Uses `process.exitCode` rather than `process.exit()` throughout. On this project's
+ * Windows/Node combination, calling `process.exit()` while an `AbortSignal.timeout()`
+ * timer from a completed `fetch()` is still pending (which askJson in src/ai/lmstudio.ts
+ * always leaves behind) crashes the process with a native libuv assertion and exit code
+ * 127 instead of the intended code — silently defeating this gate's exit-code contract.
+ * Setting `process.exitCode` and returning normally avoids that crash; verified below.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
-import { probeModelLoaded, askSemantics, askWeather, type AskOptions } from "../src/ai/lmstudio.js";
+import { probeModelLoaded, askSemantics, askWeather, ModelUnavailableError, type AskOptions } from "../src/ai/lmstudio.js";
 import { normalizeAnimals } from "../src/ai/normalize.js";
 
-const fixture = JSON.parse(readFileSync("tests/ai/fixtures/reference-set.json", "utf8"));
-const root = process.env.EVAL_MEDIA_ROOT ?? fixture.mediaRoot;
-const ask: AskOptions = {
-  url: process.env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234",
-  model: process.env.AI_MODEL ?? "qwen/qwen3-vl-8b",
-  timeoutMs: 60000,
-};
-const width = Number(process.env.AI_IMAGE_WIDTH ?? "1024");
+/** Thrown to unwind out of the frame/weather loops when the model itself went away. */
+class ModelWentAway extends Error {}
 
-if (!(await probeModelLoaded({ ...ask, timeoutMs: 5000 }))) {
-  console.error(`Model ${ask.model} is not loaded in LM Studio at ${ask.url}.`);
-  process.exit(2);
+async function main(): Promise<void> {
+  const fixture = JSON.parse(readFileSync("tests/ai/fixtures/reference-set.json", "utf8"));
+  const root = process.env.EVAL_MEDIA_ROOT ?? fixture.mediaRoot;
+  const ask: AskOptions = {
+    url: process.env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234",
+    model: process.env.AI_MODEL ?? "qwen/qwen3-vl-8b",
+    timeoutMs: 60000,
+  };
+  const width = Number(process.env.AI_IMAGE_WIDTH ?? "1024");
+
+  if (!(await probeModelLoaded({ ...ask, timeoutMs: 5000 }))) {
+    console.error(`Model ${ask.model} is not loaded in LM Studio at ${ask.url}.`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const jpeg = (p: string) =>
+    sharp(join(root, p)).resize({ width, withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+
+  /**
+   * The model process itself is gone (host down, unloaded mid-batch, 5xx / transport
+   * failure). Continuing would silently score the remaining, untested frames as passes.
+   * Unwinds to the same distinct exit code the absent-model precondition uses, so this
+   * failure mode is never confused with "all thresholds passed."
+   */
+  function modelWentAway(context: string, e: unknown): never {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error(`Model became unavailable mid-run while processing ${context}: ${detail}`);
+    throw new ModelWentAway();
+  }
+
+  let personHit = 0, personTotal = 0, personFalse = 0, personNegTotal = 0;
+  let animalHit = 0, animalTotal = 0, animalInvented = 0, animalNegTotal = 0;
+  const latencies: number[] = [];
+  let fogHit = 0, fogTotal = 0, snowHit = 0, snowTotal = 0;
+  const wLatencies: number[] = [];
+
+  try {
+    for (const f of fixture.frames) {
+      try {
+        const t0 = Date.now();
+        const r = await askSemantics(ask, await jpeg(f.path));
+        latencies.push(Date.now() - t0);
+        const kinds = normalizeAnimals(r.animals).kinds;
+
+        if (f.people > 0) { personTotal++; if (r.peopleCount > 0) personHit++; }
+        else { personNegTotal++; if (r.peopleCount > 0) personFalse++; }
+
+        if (f.animals.length > 0) { animalTotal++; if (kinds.length > 0) animalHit++; }
+        else { animalNegTotal++; if (kinds.length > 0) animalInvented++; }
+
+        console.log(`${f.path.padEnd(28)} people=${r.peopleCount} animals=${JSON.stringify(kinds)}`);
+      } catch (e) {
+        if (e instanceof ModelUnavailableError) modelWentAway(f.path, e);
+        // Anything else — missing/unreadable file (e.g. pruned by disk hygiene, or a
+        // wrong EVAL_MEDIA_ROOT), a rejected answer — counts against this frame's
+        // measure as a miss rather than crashing the run. A recall total is still
+        // bumped so the frame isn't silently dropped from the denominator; a negative
+        // frame is excluded from the false-alarm/invented sample since no answer was
+        // observed for it.
+        console.error(`SKIP ${f.path}: ${e instanceof Error ? e.message : String(e)}`);
+        if (f.people > 0) personTotal++;
+        if (f.animals.length > 0) animalTotal++;
+      }
+    }
+
+    for (const w of fixture.weather) {
+      try {
+        const t0 = Date.now();
+        const r = await askWeather(ask, await jpeg(w.path));
+        wLatencies.push(Date.now() - t0);
+        if (w.visibility === "dense_fog") { fogTotal++; if (r.visibility === "dense_fog") fogHit++; }
+        if (w.precipitation === "snow") { snowTotal++; if (r.precipitation === "snow") snowHit++; }
+        if (w.precipitation === "none") { snowTotal++; if (r.precipitation === "none") snowHit++; }
+        console.log(`${w.path.padEnd(28)} visibility=${r.visibility} precipitation=${r.precipitation}`);
+      } catch (e) {
+        if (e instanceof ModelUnavailableError) modelWentAway(w.path, e);
+        console.error(`SKIP ${w.path}: ${e instanceof Error ? e.message : String(e)}`);
+        if (w.visibility === "dense_fog") fogTotal++;
+        if (w.precipitation === "snow" || w.precipitation === "none") snowTotal++;
+      }
+    }
+  } catch (e) {
+    if (e instanceof ModelWentAway) {
+      process.exitCode = 2;
+      return;
+    }
+    throw e;
+  }
+
+  const median = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : undefined);
+  const fmtMs = (a: number[]) => (a.length ? `${median(a)} ms` : "n/a (no successful calls)");
+
+  // Every ratio-style threshold below guards on total > 0: without it, a fixture category
+  // that ends up with zero entries (e.g. every frame in it was skipped) would satisfy its
+  // `hit === total` or `count === 0` check vacuously and report PASS despite testing nothing.
+  const checks: Array<[string, boolean, string]> = [
+    ["person recall", personTotal > 0 && personHit === personTotal, `${personHit}/${personTotal}`],
+    ["person false alarms", personNegTotal > 0 && personFalse === 0, `${personFalse}/${personNegTotal}`],
+    ["animal recall", animalTotal > 0 && animalHit === animalTotal, `${animalHit}/${animalTotal}`],
+    ["invented animals", animalNegTotal > 0 && animalInvented === 0, `${animalInvented}/${animalNegTotal}`],
+    ["dense fog", fogTotal > 0 && fogHit === fogTotal, `${fogHit}/${fogTotal}`],
+    ["snow", snowTotal > 0 && snowHit === snowTotal, `${snowHit}/${snowTotal}`],
+    ["semantic latency <= 2000 ms", latencies.length > 0 && (median(latencies) as number) <= 2000, fmtMs(latencies)],
+    ["weather latency <= 4000 ms", wLatencies.length > 0 && (median(wLatencies) as number) <= 4000, fmtMs(wLatencies)],
+  ];
+
+  console.log("\n=== thresholds ===");
+  let failed = false;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(30)} ${detail}`);
+    if (!ok) failed = true;
+  }
+  process.exitCode = failed ? 1 : 0;
 }
 
-const jpeg = (p: string) =>
-  sharp(join(root, p)).resize({ width, withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
-
-let personHit = 0, personTotal = 0, personFalse = 0, personNegTotal = 0;
-let animalHit = 0, animalTotal = 0, animalInvented = 0;
-const latencies: number[] = [];
-
-for (const f of fixture.frames) {
-  const t0 = Date.now();
-  const r = await askSemantics(ask, await jpeg(f.path));
-  latencies.push(Date.now() - t0);
-  const kinds = normalizeAnimals(r.animals).kinds;
-
-  if (f.people > 0) { personTotal++; if (r.peopleCount > 0) personHit++; }
-  else { personNegTotal++; if (r.peopleCount > 0) personFalse++; }
-
-  if (f.animals.length > 0) { animalTotal++; if (kinds.length > 0) animalHit++; }
-  else if (kinds.length > 0) { animalInvented++; }
-
-  console.log(`${f.path.padEnd(28)} people=${r.peopleCount} animals=${JSON.stringify(kinds)}`);
-}
-
-let fogHit = 0, fogTotal = 0, snowHit = 0, snowTotal = 0;
-const wLatencies: number[] = [];
-for (const w of fixture.weather) {
-  const t0 = Date.now();
-  const r = await askWeather(ask, await jpeg(w.path));
-  wLatencies.push(Date.now() - t0);
-  if (w.visibility === "dense_fog") { fogTotal++; if (r.visibility === "dense_fog") fogHit++; }
-  if (w.precipitation === "snow") { snowTotal++; if (r.precipitation === "snow") snowHit++; }
-  if (w.precipitation === "none") { snowTotal++; if (r.precipitation === "none") snowHit++; }
-  console.log(`${w.path.padEnd(28)} visibility=${r.visibility} precipitation=${r.precipitation}`);
-}
-
-const median = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
-
-const checks: Array<[string, boolean, string]> = [
-  ["person recall", personHit === personTotal, `${personHit}/${personTotal}`],
-  ["person false alarms", personFalse === 0, `${personFalse}/${personNegTotal}`],
-  ["animal recall", animalHit === animalTotal, `${animalHit}/${animalTotal}`],
-  ["invented animals", animalInvented === 0, String(animalInvented)],
-  ["dense fog", fogHit === fogTotal, `${fogHit}/${fogTotal}`],
-  ["snow", snowHit === snowTotal, `${snowHit}/${snowTotal}`],
-  ["semantic latency <= 2000 ms", median(latencies) <= 2000, `${median(latencies)} ms`],
-  ["weather latency <= 4000 ms", median(wLatencies) <= 4000, `${median(wLatencies)} ms`],
-];
-
-console.log("\n=== thresholds ===");
-let failed = false;
-for (const [name, ok, detail] of checks) {
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(30)} ${detail}`);
-  if (!ok) failed = true;
-}
-process.exit(failed ? 1 : 0);
+await main();
