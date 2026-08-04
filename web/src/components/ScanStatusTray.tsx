@@ -47,6 +47,14 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
 
   // Separate poll for the extended pass (loop B) — its own model, its own progress,
   // and its own cadence. Independent of the activity-scan poll above.
+  //
+  // /api/ai/status runs seven aggregates over the whole local-image table, so this loop
+  // is deliberately conservative: it always polls once (to learn whether the pass is
+  // enabled at all), then stops entirely if it isn't — AI_TAGGING_ENABLED is a startup
+  // config flag, not something that flips at runtime, so there is nothing to catch by
+  // polling a disabled feature forever. While enabled, the interval backs off to 60 s
+  // whenever the model isn't loaded (the owner's workstation being off is the common
+  // case, not something that needs 15 s-fresh status).
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
@@ -55,7 +63,9 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
         const s = await api.aiStatus();
         if (stopped) return;
         setAi(s);
-        timer = setTimeout(poll, s.scanning ? 3000 : 15000);
+        if (!s.enabled) return; // disabled at startup: nothing will ever change, stop polling
+        const interval = s.scanning ? 3000 : s.modelLoaded ? 15000 : 60000;
+        timer = setTimeout(poll, interval);
       } catch {
         timer = setTimeout(poll, 15000);
       }
@@ -67,13 +77,22 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
     };
   }, []);
 
-  if (!status || !status.enabled || status.totalLocalImages === 0) return null;
+  // Each row is gated on its OWN enabled flag — the two passes are independent products
+  // (see project-level note in src/ai/scanner.ts), so disabling loop A (activity
+  // detection) must never hide loop B's status/controls, and vice versa. The whole tray
+  // disappears only when NEITHER pass is enabled.
+  const activityVisible = !!status && status.enabled && status.totalLocalImages > 0;
+  const aiVisible = !!ai && ai.enabled;
+  if (!activityVisible && !aiVisible) return null;
 
-  const pct = status.totalLocalImages > 0 ? Math.round((status.scanned / status.totalLocalImages) * 100) : 100;
-  const done = status.pending === 0;
-  const active = status.scanning && !status.paused && !done;
+  const pct =
+    status && status.totalLocalImages > 0 ? Math.round((status.scanned / status.totalLocalImages) * 100) : 100;
+  const done = status ? status.pending === 0 : true;
+  const active = status ? status.scanning && !status.paused && !done : false;
+  const headerActive = active || (ai?.scanning ?? false);
 
   const toggle = async () => {
+    if (!status) return;
     if (status.paused) await api.resumeScan();
     else await api.pauseScan();
     setStatus({ ...status, paused: !status.paused });
@@ -87,8 +106,8 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
           className="flex w-full items-center justify-between border-b border-hairline px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-muted"
         >
           <span className="flex items-center gap-2">
-            {active && <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />}
-            activity scan
+            {headerActive && <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />}
+            {activityVisible ? "activity scan" : "extended scan"}
           </span>
           <span>{open ? "▾" : "▸"}</span>
         </button>
@@ -101,37 +120,44 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
               exit={{ height: 0 }}
               className="overflow-hidden"
             >
-              <div className="px-3 py-2.5">
-                <div className="flex items-center justify-between text-[11px] text-fg">
-                  <span>{done ? "scan complete" : status.paused ? "paused" : "scanning…"}</span>
-                  <span className="text-muted">
-                    {status.scanned.toLocaleString()}/{status.totalLocalImages.toLocaleString()}
-                  </span>
+              {status && status.enabled && status.totalLocalImages > 0 && (
+                <div className="px-3 py-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-fg">
+                    <span>{done ? "scan complete" : status.paused ? "paused" : "scanning…"}</span>
+                    <span className="text-muted">
+                      {status.scanned.toLocaleString()}/{status.totalLocalImages.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="my-1.5 h-1 w-full overflow-hidden rounded-full bg-hairline">
+                    <div
+                      className={`h-full transition-all duration-300 ${done ? "bg-teal" : "bg-amber"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-muted">
+                    <span>
+                      {pct}% · {status.withActivity.toLocaleString()} with activity
+                    </span>
+                    {!done && (
+                      <button onClick={toggle} className="text-amber hover:underline">
+                        {status.paused ? "resume" : "pause"}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="my-1.5 h-1 w-full overflow-hidden rounded-full bg-hairline">
-                  <div
-                    className={`h-full transition-all duration-300 ${done ? "bg-teal" : "bg-amber"}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-muted">
-                  <span>
-                    {pct}% · {status.withActivity.toLocaleString()} with activity
-                  </span>
-                  {!done && (
-                    <button onClick={toggle} className="text-amber hover:underline">
-                      {status.paused ? "resume" : "pause"}
-                    </button>
-                  )}
-                </div>
-              </div>
+              )}
 
               {/* Second row: extended pass (loop B). "model niedostępny" is a neutral
                   resting state, not an error — the owner's workstation being off is
                   normal, so it is styled muted like everything else here, never amber
-                  or red. */}
-              {ai?.enabled && (
-                <div className="flex items-center gap-2 border-t border-hairline px-3 py-2 font-mono text-[10px] text-muted">
+                  or red. Independent of the row above: this renders (and stays the
+                  tray's only content) even when loop A is disabled entirely. */}
+              {ai && ai.enabled && (
+                <div
+                  className={`flex items-center gap-2 px-3 py-2 font-mono text-[10px] text-muted ${
+                    activityVisible ? "border-t border-hairline" : ""
+                  }`}
+                >
                   <span className={ai.modelLoaded ? "text-emerald-400" : "text-muted"}>
                     {ai.modelLoaded ? "model załadowany" : "model niedostępny"}
                   </span>
