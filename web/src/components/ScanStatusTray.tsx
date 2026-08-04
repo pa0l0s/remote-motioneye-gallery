@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api } from "../api";
-import type { ScanStatus } from "../api";
+import type { ScanStatus, AiStatus } from "../api";
 
 interface ScanStatusTrayProps {
   /** Called when newly-detected activity lands, so the grid/timeline can refresh. */
@@ -16,6 +16,8 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [open, setOpen] = useState(true);
   const lastWithActivity = useRef(0);
+
+  const [ai, setAi] = useState<AiStatus | null>(null);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -42,6 +44,28 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
       clearTimeout(timer);
     };
   }, [onScanProgress]);
+
+  // Separate poll for the extended pass (loop B) — its own model, its own progress,
+  // and its own cadence. Independent of the activity-scan poll above.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    async function poll() {
+      try {
+        const s = await api.aiStatus();
+        if (stopped) return;
+        setAi(s);
+        timer = setTimeout(poll, s.scanning ? 3000 : 15000);
+      } catch {
+        timer = setTimeout(poll, 15000);
+      }
+    }
+    void poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, []);
 
   if (!status || !status.enabled || status.totalLocalImages === 0) return null;
 
@@ -101,6 +125,34 @@ export function ScanStatusTray({ onScanProgress }: ScanStatusTrayProps) {
                   )}
                 </div>
               </div>
+
+              {/* Second row: extended pass (loop B). "model niedostępny" is a neutral
+                  resting state, not an error — the owner's workstation being off is
+                  normal, so it is styled muted like everything else here, never amber
+                  or red. */}
+              {ai?.enabled && (
+                <div className="flex items-center gap-2 border-t border-hairline px-3 py-2 font-mono text-[10px] text-muted">
+                  <span className={ai.modelLoaded ? "text-emerald-400" : "text-muted"}>
+                    {ai.modelLoaded ? "model załadowany" : "model niedostępny"}
+                  </span>
+                  <span className="tabular-nums">
+                    {ai.scanned.toLocaleString("pl")} / {ai.totalLocalImages.toLocaleString("pl")}
+                  </span>
+                  {ai.avgLatencyMs != null && (
+                    <span className="tabular-nums">{ai.avgLatencyMs} ms/klatkę</span>
+                  )}
+                  <button
+                    onClick={() => {
+                      const next = !ai.paused;
+                      void (ai.paused ? api.resumeAi() : api.pauseAi());
+                      setAi({ ...ai, paused: next });
+                    }}
+                    className="ml-auto hover:text-fg"
+                  >
+                    {ai.paused ? "wznów" : "pauza"}
+                  </button>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

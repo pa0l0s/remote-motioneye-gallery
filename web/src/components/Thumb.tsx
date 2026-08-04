@@ -115,7 +115,7 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
         title={local ? "cached locally" : "remote (not downloaded)"}
       />
 
-      {/* activity-detected badge */}
+      {/* activity-detected badge (loop A) */}
       {media.hasActivity && (
         <span
           className="pointer-events-none absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1 rounded-sm bg-amber/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink shadow-glow"
@@ -135,6 +135,47 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
           </svg>
           activity
         </span>
+      )}
+
+      {/* extended-pass badges (loop B) — visually distinct from the amber activity dot
+          above, so it is obvious which pass produced which label. Grouped into flex rows
+          instead of the brief's fixed left offsets: bottom-left (people/animal) sits
+          opposite the bottom-right activity badge, and the top row starts past the
+          selection checkbox's 20px footprint so a fog/snow badge never renders under the
+          checkmark when a foggy or snowy frame is selected. */}
+      {((media.aiPeopleCount ?? 0) > 0 || media.aiAnimalKinds) && (
+        <div className="pointer-events-none absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1">
+          {(media.aiPeopleCount ?? 0) > 0 && (
+            <span
+              className="rounded-sm bg-sky-400/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink"
+              title={`${media.aiPeopleCount} osoba/osób`}
+            >
+              osoba
+            </span>
+          )}
+          {media.aiAnimalKinds && (
+            <span
+              className="rounded-sm bg-emerald-400/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink"
+              title={`zwierzę: ${media.aiAnimalKinds.replaceAll(",", " ").trim()}`}
+            >
+              {media.aiAnimalKinds.split(",").filter(Boolean)[0]}
+            </span>
+          )}
+        </div>
+      )}
+      {(media.weatherVisibility === "dense_fog" || media.weatherPrecipitation === "snow") && (
+        <div className="pointer-events-none absolute top-1.5 left-8 z-10 flex items-center gap-1">
+          {media.weatherVisibility === "dense_fog" && (
+            <span className="rounded-sm bg-slate-300/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink">
+              mgła
+            </span>
+          )}
+          {media.weatherPrecipitation === "snow" && (
+            <span className="rounded-sm bg-white/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink">
+              śnieg
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
