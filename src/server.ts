@@ -90,7 +90,12 @@ export async function buildApp() {
   registerMediaRoutes(app, { prisma, ensureFile, ensureThumbFor });
   registerTimelineRoutes(app, { prisma });
   registerDownloadRoutes(app, { prisma, manager: downloads });
-  registerActivityRoutes(app, { prisma, control: scanControl, enabled: cfg.activity.enabled });
+  registerActivityRoutes(app, {
+    prisma,
+    control: scanControl,
+    enabled: cfg.activity.enabled,
+    scoreThreshold: cfg.activity.scoreThreshold,
+  });
 
   // Serve the built SPA (web/dist) with a history-API fallback.
   const staticDir = resolve(process.env.STATIC_DIR ?? "web/dist");
