@@ -14,6 +14,14 @@ export interface MediaFile {
   thumbReady: boolean;
   hasActivity: boolean;
   activityScore: number | null;
+  // Extended pass (null until the vision model has seen this frame).
+  aiScannedAt: string | null;
+  aiPeopleCount: number | null;
+  aiAnimalKinds: string | null; // ",bird,dog," or null
+  weatherVisibility: string | null;
+  weatherPrecipitation: string | null;
+  weatherSnowOnGround: boolean | null;
+  isNightIr: boolean | null;
 }
 
 export interface MediaPage {
@@ -25,6 +33,9 @@ export interface HistogramBucket {
   bucket: string;
   count: number;
   activityCount: number;
+  peopleCount: number;
+  animalCount: number;
+  weatherCount: number;
 }
 
 export interface ScanStatus {
@@ -35,6 +46,24 @@ export interface ScanStatus {
   scanned: number;
   pending: number;
   withActivity: number;
+}
+
+export interface AiStatus {
+  enabled: boolean;
+  paused: boolean;
+  scanning: boolean;
+  modelLoaded: boolean;
+  model: string;
+  lastProbeAt: string | null;
+  totalLocalImages: number;
+  scanned: number;
+  pending: number;
+  weatherScanned: number;
+  withPeople: number;
+  withAnimals: number;
+  withWeather: number;
+  avgLatencyMs: number | null;
+  lastError: string | null;
 }
 
 export interface DownloadJob {
@@ -72,6 +101,8 @@ export const api = {
       from?: string;
       to?: string;
       activityOnly?: boolean;
+      detections?: string[];
+      scannedBy?: "basic" | "ai" | "both" | "none";
     } = {},
   ) => {
     const p = new URLSearchParams({ cameraId: String(cameraId), limit: String(opts.limit ?? 150) });
@@ -79,6 +110,8 @@ export const api = {
     if (opts.from) p.set("from", opts.from);
     if (opts.to) p.set("to", opts.to);
     if (opts.activityOnly) p.set("activityOnly", "true");
+    if (opts.detections?.length) p.set("detections", opts.detections.join(","));
+    if (opts.scannedBy) p.set("scannedBy", opts.scannedBy);
     return getJson<MediaPage>(`/api/media?${p.toString()}`);
   },
   thumbUrl: (id: number) => `/api/media/${id}/thumb`,
@@ -97,4 +130,8 @@ export const api = {
   activityStatus: () => getJson<ScanStatus>("/api/activity/status"),
   pauseScan: () => fetch("/api/activity/pause", { method: "POST" }).then((r) => r.json()),
   resumeScan: () => fetch("/api/activity/resume", { method: "POST" }).then((r) => r.json()),
+
+  aiStatus: () => getJson<AiStatus>("/api/ai/status"),
+  pauseAi: () => fetch("/api/ai/pause", { method: "POST" }).then((r) => r.json()),
+  resumeAi: () => fetch("/api/ai/resume", { method: "POST" }).then((r) => r.json()),
 };
