@@ -60,16 +60,23 @@ const PAGE = 50;
  * purposes, so bumping the prompt version turns into an ordinary resumable pass over the
  * whole archive rather than a wipe-and-restart.
  *
- * Two failure modes are deliberately distinguished:
+ * Three failure modes are deliberately distinguished:
  *  - ModelUnavailableError means the model process itself is gone (host down, unloaded
  *    mid-batch, 5xx). The whole batch aborts immediately and NOTHING is marked scanned:
  *    if aiScannedAt kept being written while every call failed, the first time the
  *    workstation is switched off mid-backfill would silently record the entire remaining
  *    archive as "scanned, found nothing" — a data-destroying false negative.
- *  - FrameRejectedError (or a failed local file read) means this one frame is unusable.
- *    It counts against that frame's aiFailures only; once aiFailures reaches maxFailures
- *    the frame is marked scanned anyway so the loop keeps making forward progress instead
- *    of retrying a permanently bad frame forever.
+ *  - A local file read failure (loadJpeg/isNight throwing) for EVERY frame in a fetched
+ *    page means the media mount itself is gone (unmounted NAS bind, dropped volume) —
+ *    an environment fault, not 50-or-200 individually corrupt JPEGs. Each page is read in
+ *    full before anything is written; if every read in it failed, the call aborts exactly
+ *    like ModelUnavailableError — nothing marked, control.lastError bound from the read
+ *    error — instead of burning every frame's aiFailures down to "scanned, found nothing".
+ *  - FrameRejectedError, or a read failure for only SOME frames in a page (the ordinary
+ *    "one corrupt JPEG among many good ones" case), means this one frame is unusable. It
+ *    counts against that frame's aiFailures only; once aiFailures reaches maxFailures the
+ *    frame is marked scanned anyway so the loop keeps making forward progress instead of
+ *    retrying a permanently bad frame forever.
  */
 export async function runAiScanOnce(args: {
   prisma: PrismaClient;
@@ -124,21 +131,43 @@ export async function runAiScanOnce(args: {
     });
     if (page.length === 0) return { scanned, weatherScanned, stopped: "empty" };
 
+    // Read every frame in this page before writing anything. A page where EVERY read
+    // fails (unmounted media volume, dropped NAS bind mount) is an environment fault,
+    // not up to 50 individually corrupt JPEGs, and must abort the call the same way a
+    // dead model does: mark nothing, and let the caller back off instead of hammering a
+    // volume that will not come back in the next few seconds. A page with only SOME
+    // reads failing is the ordinary case and falls through to the per-frame handling
+    // below exactly as before.
+    const reads: Array<{ f: (typeof page)[number]; jpeg: Buffer | null; night: boolean | null; error: unknown }> = [];
     for (const f of page) {
+      try {
+        const jpeg = await deps.loadJpeg(f.localPath, opts.imageWidth);
+        const night = await deps.isNight(f.localPath, opts.colorThreshold);
+        reads.push({ f, jpeg, night, error: null });
+      } catch (e) {
+        reads.push({ f, jpeg: null, night: null, error: e });
+      }
+    }
+    if (reads.every((r) => r.error !== null)) {
+      const lastError = reads[reads.length - 1].error;
+      control.modelLoaded = false;
+      control.lastError = lastError instanceof Error ? lastError.message : String(lastError);
+      return { scanned, weatherScanned, stopped: "unavailable" };
+    }
+
+    for (const r of reads) {
       if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
+      const f = r.f;
       cursorTs = f.timestamp;
       cursorId = f.id;
       visited++;
 
-      let jpeg: Buffer;
-      let night: boolean;
-      try {
-        jpeg = await deps.loadJpeg(f.localPath, opts.imageWidth);
-        night = await deps.isNight(f.localPath, opts.colorThreshold);
-      } catch {
+      if (r.error !== null) {
         await bumpFailure(prisma, f.id, opts);
         continue;
       }
+      const jpeg = r.jpeg as Buffer;
+      const night = r.night as boolean;
 
       const startedAt = Date.now();
       let semantics: SemanticResult;

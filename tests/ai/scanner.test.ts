@@ -177,19 +177,50 @@ describe("runAiScanOnce", () => {
     expect(mf.aiPromptVersion).toBe("semantics-v2");
   });
 
-  it("bounds a call by frames visited, not just frames successfully scanned", async () => {
-    // A read outage (unmounted volume, bad directory) makes loadJpeg throw for every
-    // frame. `scanned` never increments in that case, so only a visited-count bound
-    // stops one call from sweeping the whole table.
+  it("aborts and marks nothing when every read in a page fails (media mount outage)", async () => {
+    // A read outage (unmounted volume, dropped NAS bind mount) makes loadJpeg throw for
+    // every frame. This must NOT be treated as 200 individually corrupt JPEGs: bumping
+    // every visited frame's aiFailures would, over a handful of calls, falsely record
+    // the whole archive as "scanned, found nothing" -- exactly the false-negative outcome
+    // the ModelUnavailableError abort-and-mark-nothing path exists to prevent, reached
+    // through the file-read door instead of the model door.
     await seed(10);
+    const ctl = control();
     const res = await runAiScanOnce({
-      prisma, opts: { ...OPTS, batch: 4 }, control: control(),
-      deps: deps({ loadJpeg: async () => { throw new Error("ENOENT"); } }),
+      prisma, opts: { ...OPTS, batch: 4 }, control: ctl,
+      deps: deps({ loadJpeg: async () => { throw new Error("ENOENT: no such file or directory"); } }),
     });
+    expect(res.stopped).toBe("unavailable");
     expect(res.scanned).toBe(0);
-    expect(res.stopped).toBe("batch");
     const touched = await prisma.mediaFile.count({ where: { aiFailures: { gt: 0 } } });
-    expect(touched).toBe(4);
+    expect(touched).toBe(0); // nothing marked -- not even a failure count
+    const rows = await prisma.mediaFile.findMany();
+    expect(rows.every((r) => r.aiScannedAt === null)).toBe(true);
+    expect(ctl.modelLoaded).toBe(false);
+    expect(ctl.lastError).toMatch(/ENOENT/);
+  });
+
+  it("still bumps aiFailures per-frame when only SOME reads in a page fail", async () => {
+    // The mount is fine; a handful of frames are individually unreadable (e.g. corrupt
+    // JPEGs). That is the ordinary per-frame failure path, not an environment fault, so
+    // it must not trip the whole-page abort above.
+    await seed(3);
+    const rows0 = await prisma.mediaFile.findMany({ orderBy: { timestamp: "desc" } });
+    const badPath = rows0[1].localPath; // the middle (by timestamp) of the 3 seeded frames
+    const res = await runAiScanOnce({
+      prisma, opts: OPTS, control: control(),
+      deps: deps({
+        loadJpeg: async (p: string) => {
+          if (p === badPath) throw new Error("corrupt jpeg");
+          return Buffer.from([1]);
+        },
+      }),
+    });
+    expect(res.stopped).toBe("empty"); // only 3 frames seeded, well under the batch cap
+    expect(res.scanned).toBe(2);
+    const bad = await prisma.mediaFile.findFirstOrThrow({ where: { localPath: badPath } });
+    expect(bad.aiFailures).toBe(1);
+    expect(bad.aiScannedAt).toBeNull(); // still retryable, not given up on yet
   });
 
   it("re-scans frames whose prompt version is stale, and leaves current ones alone", async () => {
