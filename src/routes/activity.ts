@@ -44,13 +44,18 @@ export function registerActivityRoutes(app: FastifyInstance, deps: ActivityDeps)
     return { paused: false };
   });
 
-  // Clear all activity results so the scanner re-processes from scratch — used after tuning
-  // thresholds / detection logic so the change applies to already-scanned frames too.
-  app.post("/api/activity/rescan", async () => {
+  // Clear activity results so the scanner re-processes frames after a tuning change.
+  // With keepScores=true the stored per-frame scores survive: re-applying a threshold
+  // does not require decoding 209k JPEGs again, only re-evaluating numbers already held.
+  app.post("/api/activity/rescan", async (req) => {
+    const q = req.query as Record<string, string | undefined>;
+    const keepScores = q.keepScores === "true";
     const res = await prisma.mediaFile.updateMany({
       where: { activityScannedAt: { not: null } },
-      data: { activityScannedAt: null, hasActivity: false, activityScore: null },
+      data: keepScores
+        ? { activityScannedAt: null, hasActivity: false }
+        : { activityScannedAt: null, hasActivity: false, activityScore: null },
     });
-    return { reset: res.count };
+    return { reset: res.count, keptScores: keepScores };
   });
 }
