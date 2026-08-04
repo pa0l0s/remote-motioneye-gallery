@@ -146,6 +146,16 @@ export function App() {
     void api.aiStatus().then(setAiStatus).catch(() => setAiStatus(null));
   }, [pokes]);
 
+  // Changing which kinds are shown re-scopes the grid to "everything matching, from the
+  // top" — the previously selected day no longer describes what's on screen, so drop it.
+  // Otherwise the timeline keeps showing a stale day badge and "download day" would still
+  // target a day the user isn't looking at anymore.
+  const changeDetections = (next: string[]) => {
+    setDetections(next);
+    setCurrentFrom(undefined);
+    setActiveBucket(undefined);
+  };
+
   const open = (m: MediaFile) => setOpenIndex(items.findIndex((x) => x.id === m.id));
   const total = buckets.reduce((s, b) => s + b.count, 0);
   const totalActivity = buckets.reduce((s, b) => s + b.activityCount, 0);
@@ -167,7 +177,7 @@ export function App() {
         <div className="flex items-center gap-6">
           <DetectionFilter
             selected={detections}
-            onChange={setDetections}
+            onChange={changeDetections}
             counts={{
               motion: totalActivity,
               people: aiStatus?.withPeople ?? 0,
