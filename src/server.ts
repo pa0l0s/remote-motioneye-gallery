@@ -22,6 +22,7 @@ import { DownloadManager } from "./downloads/manager.js";
 import { registerDownloadRoutes } from "./routes/downloads.js";
 import { runActivityScanOnce, type ScanControl } from "./activity/scanner.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import { startAiRunner } from "./ai/runner.js";
 
 export async function buildApp() {
   const cfg = loadConfig();
@@ -168,6 +169,18 @@ export async function buildApp() {
       }
     };
     startIndexLoop(scanCycle, cfg.activity.intervalSeconds, (err) => app.log.error(err));
+  }
+
+  // Extended pass — entirely separate from the activity loop above. Disabled by default;
+  // when enabled it idles harmlessly whenever the workstation is off (see aiRunnerTick).
+  if (cfg.ai.enabled) {
+    const ai = startAiRunner({
+      prisma,
+      cfg,
+      log: (msg, err) => app.log.warn({ err }, msg),
+    });
+    app.addHook("onClose", async () => ai.stop());
+    // TODO(Task 9): registerAiRoutes(app, { prisma, control: ai.control, cfg });
   }
 
   return app;
