@@ -4,7 +4,7 @@ import { makeTestDb } from "../helpers/testDb.js";
 const { prisma } = makeTestDb();
 afterAll(async () => { await prisma.$disconnect(); });
 
-describe("MediaFile — kolumny przebiegu rozszerzonego", () => {
+describe("MediaFile — extended-pass columns", () => {
   it("stores AI and weather columns independently of the activity columns", async () => {
     const cam = await prisma.camera.create({ data: { motionEyeId: 1, name: "Cam" } });
     const mf = await prisma.mediaFile.create({
