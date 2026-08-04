@@ -21,11 +21,18 @@ export function registerTimelineRoutes(app: FastifyInstance, deps: TimelineDeps)
     if (!fmt) return reply.code(400).send({ error: "bad bucket" });
 
     const rows = await prisma.$queryRaw<
-      Array<{ bucket: string; count: bigint; activityCount: bigint }>
+      Array<{
+        bucket: string; count: bigint; activityCount: bigint;
+        peopleCount: bigint; animalCount: bigint; weatherCount: bigint;
+      }>
     >(Prisma.sql`
       SELECT strftime(${fmt}, timestamp / 1000, 'unixepoch') AS bucket,
              COUNT(*) AS count,
-             SUM(CASE WHEN hasActivity THEN 1 ELSE 0 END) AS activityCount
+             SUM(CASE WHEN hasActivity THEN 1 ELSE 0 END) AS activityCount,
+             SUM(CASE WHEN aiPeopleCount > 0 THEN 1 ELSE 0 END) AS peopleCount,
+             SUM(CASE WHEN aiAnimalKinds IS NOT NULL THEN 1 ELSE 0 END) AS animalCount,
+             SUM(CASE WHEN weatherVisibility = 'dense_fog'
+                        OR weatherPrecipitation IN ('snow','heavy_rain') THEN 1 ELSE 0 END) AS weatherCount
       FROM MediaFile
       WHERE cameraId = ${cameraId}
       GROUP BY bucket
@@ -35,6 +42,9 @@ export function registerTimelineRoutes(app: FastifyInstance, deps: TimelineDeps)
       bucket: r.bucket,
       count: Number(r.count),
       activityCount: Number(r.activityCount),
+      peopleCount: Number(r.peopleCount),
+      animalCount: Number(r.animalCount),
+      weatherCount: Number(r.weatherCount),
     }));
   });
 
