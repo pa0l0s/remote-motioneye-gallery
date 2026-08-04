@@ -49,6 +49,17 @@ export interface SemanticResult {
 
 /** The model went away (host down, unloaded mid-batch, 5xx). Abort the batch, mark nothing. */
 export class ModelUnavailableError extends Error {}
+/**
+ * The request timed out (AbortSignal.timeout fired) rather than failing outright. The
+ * host did not go away — it is busy, most often GPU contention from another process on
+ * the owner's workstation. Measured 29-36 s per frame under contention against a 60 s
+ * timeout is enough to trip this regularly. Deliberately NOT a subclass of
+ * ModelUnavailableError: callers must tell the two apart (see aiRunnerTick), because a
+ * timeout must not push out the next probe the way a genuine outage does, and must not
+ * be reclassified as a frame failure either -- five slow frames would then give up on a
+ * perfectly good one.
+ */
+export class ModelTimeoutError extends Error {}
 /** The model answered but this frame is unusable (4xx, malformed content). Count against the frame. */
 export class FrameRejectedError extends Error {}
 
@@ -90,7 +101,14 @@ export async function askJson<T>(
       }),
     });
   } catch (e) {
-    throw new ModelUnavailableError(`transport: ${(e as Error).message}`);
+    const err = e as Error;
+    // Node's fetch rejects an AbortSignal.timeout()-triggered abort with a DOMException
+    // named "TimeoutError" (a plain user-initiated abort would be "AbortError"); either
+    // way it is the request taking too long, not the host being gone.
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new ModelTimeoutError(`timed out after ${opts.timeoutMs}ms: ${err.message}`);
+    }
+    throw new ModelUnavailableError(`transport: ${err.message}`);
   }
 
   if (res.status >= 500) throw new ModelUnavailableError(`http ${res.status}`);

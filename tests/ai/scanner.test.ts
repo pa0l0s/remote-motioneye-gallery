@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll, beforeEach } from "vitest";
 import { makeTestDb } from "../helpers/testDb.js";
 import { runAiScanOnce, type AiScanControl } from "../../src/ai/scanner.js";
-import { ModelUnavailableError, FrameRejectedError } from "../../src/ai/lmstudio.js";
+import { ModelUnavailableError, ModelTimeoutError, FrameRejectedError } from "../../src/ai/lmstudio.js";
 
 const { prisma } = makeTestDb();
 afterAll(async () => { await prisma.$disconnect(); });
@@ -131,6 +131,26 @@ describe("runAiScanOnce", () => {
     expect(rows.every((r) => r.aiScannedAt === null)).toBe(true);
     expect(rows.every((r) => r.aiFailures === 0)).toBe(true);
     expect(ctl.modelLoaded).toBe(false);
+  });
+
+  it("aborts the batch and marks nothing on a timeout, distinctly from an outage", async () => {
+    // A timeout means the host is busy, not gone. It must still abort the batch and mark
+    // nothing (the same SAFETY property as ModelUnavailableError) but is reported as a
+    // distinct "timeout" stop reason -- aiRunnerTick relies on that distinction to avoid
+    // pushing the next probe out by a full interval over a merely-slow frame.
+    await seed(3);
+    const ctl = control();
+    const res = await runAiScanOnce({
+      prisma, opts: OPTS, control: ctl,
+      deps: deps({ askSemantics: async () => { throw new ModelTimeoutError("timed out after 60000ms"); } }),
+    });
+    expect(res.stopped).toBe("timeout");
+    expect(res.scanned).toBe(0);
+    const rows = await prisma.mediaFile.findMany();
+    expect(rows.every((r) => r.aiScannedAt === null)).toBe(true);
+    expect(rows.every((r) => r.aiFailures === 0)).toBe(true);
+    expect(ctl.modelLoaded).toBe(false);
+    expect(ctl.lastError).toMatch(/timed out/);
   });
 
   it("counts a rejected frame against that frame and gives up after maxFailures", async () => {

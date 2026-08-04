@@ -58,6 +58,41 @@ describe("aiRunnerTick", () => {
     expect(probe).toHaveBeenCalledTimes(2);
   });
 
+  it("on a timeout, stops scanning but does NOT push the next probe out", async () => {
+    const probe = vi.fn().mockResolvedValue(true);
+    const scan = vi.fn().mockResolvedValue({ scanned: 0, weatherScanned: 0, stopped: "timeout" });
+    const s = state();
+    // Model already loaded (as if a prior probe succeeded well before now); lastProbeMs
+    // reflects that earlier probe, deliberately far enough in the past that a real probe
+    // interval has already elapsed -- the steady-state condition this fix targets.
+    s.control.modelLoaded = true;
+    s.lastProbeMs = 0;
+    await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_000_000 });
+    expect(scan).toHaveBeenCalledOnce();
+    expect(s.control.modelLoaded).toBe(false); // batch still aborted, like "unavailable"
+    expect(s.lastProbeMs).toBe(0); // NOT advanced to `now` -- contrast with "unavailable" below
+
+    // Next tick: because lastProbeMs was left stale, the probe fires immediately rather
+    // than waiting out probeIntervalMs.
+    await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_000_100 });
+    expect(probe).toHaveBeenCalledOnce();
+  });
+
+  it("contrast: on a genuine outage, the next probe IS pushed out by a full interval", async () => {
+    const probe = vi.fn().mockResolvedValue(true);
+    const scan = vi.fn().mockResolvedValue({ scanned: 0, weatherScanned: 0, stopped: "unavailable" });
+    const s = state();
+    s.control.modelLoaded = true;
+    s.lastProbeMs = 0;
+    await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_000_000 });
+    expect(s.control.modelLoaded).toBe(false);
+    expect(s.lastProbeMs).toBe(1_000_000); // advanced -- back off from a host that's gone
+
+    // Too soon for another probe.
+    await aiRunnerTick(s, { probe, scan, probeIntervalMs: 300_000, now: 1_010_000 });
+    expect(probe).not.toHaveBeenCalled();
+  });
+
   it("does nothing at all while paused", async () => {
     const probe = vi.fn().mockResolvedValue(true);
     const scan = vi.fn();

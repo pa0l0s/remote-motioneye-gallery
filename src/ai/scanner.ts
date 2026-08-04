@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { ModelUnavailableError, type SemanticResult, type WeatherResult } from "./lmstudio.js";
+import { ModelUnavailableError, ModelTimeoutError, type SemanticResult, type WeatherResult } from "./lmstudio.js";
 import { normalizeAnimals } from "./normalize.js";
 
 /**
@@ -43,7 +43,12 @@ export interface AiScanDeps {
 export interface AiScanResult {
   scanned: number;
   weatherScanned: number;
-  stopped: "empty" | "batch" | "paused" | "unavailable";
+  /**
+   * "timeout" is distinct from "unavailable": both abort the batch and mark nothing, but
+   * a timeout must not push the runner's next probe out by a full probe interval the way
+   * a genuine outage does -- see aiRunnerTick in runner.ts.
+   */
+  stopped: "empty" | "batch" | "paused" | "unavailable" | "timeout";
 }
 
 const PAGE = 50;
@@ -174,6 +179,11 @@ export async function runAiScanOnce(args: {
       try {
         semantics = await deps.askSemantics(jpeg);
       } catch (e) {
+        if (e instanceof ModelTimeoutError) {
+          control.modelLoaded = false;
+          control.lastError = e.message;
+          return { scanned, weatherScanned, stopped: "timeout" };
+        }
         if (e instanceof ModelUnavailableError) {
           control.modelLoaded = false;
           control.lastError = e.message;
@@ -223,6 +233,11 @@ export async function runAiScanOnce(args: {
           });
           weatherScanned++;
         } catch (e) {
+          if (e instanceof ModelTimeoutError) {
+            control.modelLoaded = false;
+            control.lastError = e.message;
+            return { scanned, weatherScanned, stopped: "timeout" };
+          }
           if (e instanceof ModelUnavailableError) {
             control.modelLoaded = false;
             control.lastError = e.message;

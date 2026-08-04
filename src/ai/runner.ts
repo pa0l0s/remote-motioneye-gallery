@@ -50,6 +50,13 @@ export async function aiRunnerTick(state: AiRunnerState, deps: TickDeps): Promis
     if (res.stopped === "unavailable") {
       state.control.modelLoaded = false;
       state.lastProbeMs = deps.now; // do not hammer a host that just went away
+    } else if (res.stopped === "timeout") {
+      // The host did not go away -- it is busy (GPU contention). Stop scanning for this
+      // tick like any other abort, but deliberately do NOT advance lastProbeMs: leaving
+      // it stale means the next tick's `dueForProbe` check fires immediately instead of
+      // waiting out the full probe interval, so a slow frame degrades throughput for one
+      // tick instead of for probeIntervalSeconds.
+      state.control.modelLoaded = false;
     } else {
       // A batch (or an empty backlog) that completes without throwing means the model
       // answered fine this tick, so any earlier error no longer describes the present.

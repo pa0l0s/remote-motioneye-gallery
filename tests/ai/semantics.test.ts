@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { askSemantics, ModelUnavailableError, FrameRejectedError } from "../../src/ai/lmstudio.js";
+import { askSemantics, ModelUnavailableError, ModelTimeoutError, FrameRejectedError } from "../../src/ai/lmstudio.js";
 
 let server: Server | null = null;
 let lastBody: any = null;
@@ -72,5 +72,27 @@ describe("askSemantics", () => {
     const url = await serve(200, JSON.stringify({ choices: [{ message: { content: "" } }] }));
     await expect(askSemantics({ url, model: "m", timeoutMs: 2000 }, JPEG))
       .rejects.toBeInstanceOf(FrameRejectedError);
+  });
+
+  it("raises ModelTimeoutError (not ModelUnavailableError) when the request times out", async () => {
+    // A slow-but-alive host must be distinguishable from a dead one: aiRunnerTick treats
+    // the two very differently (see src/ai/runner.ts) -- a genuine outage backs the next
+    // probe off by a full interval, a timeout must not.
+    // A plain object (not a bare `let`) so the assignment made inside the request
+    // handler closure below is visible to TypeScript's narrowing at the read site.
+    const held: { res: import("node:http").ServerResponse | null } = { res: null };
+    server = createServer((req, res) => {
+      // Never respond on our own; only the client's AbortSignal.timeout ends this request.
+      held.res = res;
+    });
+    const url = await new Promise<string>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => {
+        const addr = server!.address() as { port: number };
+        resolve(`http://127.0.0.1:${addr.port}`);
+      });
+    });
+    await expect(askSemantics({ url, model: "m", timeoutMs: 100 }, JPEG))
+      .rejects.toBeInstanceOf(ModelTimeoutError);
+    held.res?.end("{}"); // let the handler finish so the server can close cleanly
   });
 });
