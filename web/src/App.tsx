@@ -142,8 +142,27 @@ export function App() {
     [],
   );
 
+  // Drives the extended-pass filter group's availability and counts (DetectionFilter
+  // below). Refreshed on its own timer, not just on `pokes` (download jobs): loop B
+  // keeps labelling frames in the background whether or not the user ever downloads
+  // anything, so without this the filter group would stay dimmed with stale counts for
+  // a whole session even after the model came up and started working. 20 s is loose
+  // enough not to compete with ScanStatusTray's own /api/ai/status poll for freshness
+  // that matters here (people/animal counts), while still updating within a session.
   useEffect(() => {
-    void api.aiStatus().then(setAiStatus).catch(() => setAiStatus(null));
+    let cancelled = false;
+    const refresh = () => {
+      void api
+        .aiStatus()
+        .then((s) => { if (!cancelled) setAiStatus(s); })
+        .catch(() => { if (!cancelled) setAiStatus(null); });
+    };
+    refresh();
+    const timer = setInterval(refresh, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [pokes]);
 
   // Changing which kinds are shown re-scopes the grid to "everything matching, from the
@@ -184,6 +203,7 @@ export function App() {
               animal: aiStatus?.withAnimals ?? 0,
             }}
             aiAvailable={(aiStatus?.scanned ?? 0) > 0}
+            aiEnabled={aiStatus?.enabled ?? false}
           />
           {cameras.length > 1 && (
             <select

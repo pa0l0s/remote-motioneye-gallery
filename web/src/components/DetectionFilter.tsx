@@ -5,6 +5,10 @@ interface DetectionFilterProps {
   counts: Record<string, number>;
   /** False when the vision model has never labelled anything — the group is dimmed. */
   aiAvailable: boolean;
+  /** False when the extended pass is off at the config level (AI_TAGGING_ENABLED=false)
+   *  — distinct from aiAvailable, which can be false even while enabled (model just
+   *  hasn't loaded yet, or hasn't caught up). Picks which hint the empty group shows. */
+  aiEnabled: boolean;
 }
 
 const BASIC = [{ id: "motion", label: "ruch w kadrze" }];
@@ -28,7 +32,7 @@ const EXTENDED = [
  * everything. The two groups are separated because they come from two independent passes
  * and the user needs to know which pass produced a label.
  */
-export function DetectionFilter({ selected, onChange, counts, aiAvailable }: DetectionFilterProps) {
+export function DetectionFilter({ selected, onChange, counts, aiAvailable, aiEnabled }: DetectionFilterProps) {
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
 
@@ -70,7 +74,9 @@ export function DetectionFilter({ selected, onChange, counts, aiAvailable }: Det
         </legend>
         {!aiAvailable && (
           <p className="mb-1 max-w-[230px] font-mono text-[10px] leading-snug text-muted">
-            Model jeszcze nic nie oznaczył. Włącz go w LM Studio, żeby te filtry zadziałały.
+            {aiEnabled
+              ? "Model jeszcze nic nie oznaczył. Włącz go w LM Studio, żeby te filtry zadziałały."
+              : "Przebieg rozszerzony jest wyłączony w konfiguracji serwera."}
           </p>
         )}
         {EXTENDED.map((i) => row(i, !aiAvailable))}
