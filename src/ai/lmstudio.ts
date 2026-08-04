@@ -7,7 +7,7 @@
  * carries a per-model `state` field, which is what the owner's on/off switch is.
  */
 
-import { SEMANTICS_SYSTEM, SEMANTICS_USER, SEMANTICS_SCHEMA } from "./prompts.js";
+import { SEMANTICS_SYSTEM, SEMANTICS_USER, SEMANTICS_SCHEMA, WEATHER_SYSTEM, WEATHER_USER, WEATHER_SCHEMA } from "./prompts.js";
 
 export interface ProbeOptions {
   url: string;
@@ -111,4 +111,21 @@ export async function askSemantics(opts: AskOptions, jpeg: Buffer): Promise<Sema
     opts, jpeg, SEMANTICS_SYSTEM, SEMANTICS_USER, SEMANTICS_SCHEMA,
   );
   return { peopleCount: raw.people_count ?? 0, animals: raw.animals ?? [] };
+}
+
+export interface WeatherResult {
+  visibility: string;
+  precipitation: string;
+  snowOnGround: boolean;
+}
+
+export async function askWeather(opts: AskOptions, jpeg: Buffer): Promise<WeatherResult> {
+  const raw = await askJson<{ visibility: string; precipitation: string; snow_on_ground: boolean }>(
+    opts, jpeg, WEATHER_SYSTEM, WEATHER_USER, WEATHER_SCHEMA,
+  );
+  return {
+    visibility: raw.visibility,
+    precipitation: raw.precipitation,
+    snowOnGround: !!raw.snow_on_ground,
+  };
 }
