@@ -1,0 +1,29 @@
+{
+  "mediaRoot": "/srv/dev-disk-by-uuid-0fbe9eb7-0480-4d04-ad1d-e2dfa236ad00/nasty4/Wideo/Kukle/motioneye/Camera1",
+  "frames": [
+    { "path": "2025-07-20/08-55-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-07-20/10-05-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-07-20/11-45-00.jpg", "people": 2, "animals": [] },
+    { "path": "2025-07-20/12-35-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-07-20/13-00-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-07-20/21-05-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-03-31/17-55-00.jpg", "people": 1, "animals": [] },
+    { "path": "2025-03-31/07-35-00.jpg", "people": 0, "animals": ["bird"] },
+    { "path": "2025-04-01/08-25-00.jpg", "people": 0, "animals": ["bird", "bird"] },
+    { "path": "2025-04-12/05-55-00.jpg", "people": 0, "animals": ["dog"] },
+    { "path": "2025-11-11/12-30-00.jpg", "people": 0, "animals": ["horse", "horse"] },
+    { "path": "2026-03-10/12-00-00.jpg", "people": 0, "animals": [] },
+    { "path": "2026-03-10/00-00-00.jpg", "people": 0, "animals": [] },
+    { "path": "2025-12-05/09-00-00.jpg", "people": 0, "animals": [] },
+    { "path": "2025-12-05/12-00-00.jpg", "people": 0, "animals": [] }
+  ],
+  "weather": [
+    { "path": "2025-09-26/06-27-30.jpg", "visibility": "dense_fog" },
+    { "path": "2025-09-26/05-52-30.jpg", "visibility": "dense_fog" },
+    { "path": "2025-09-26/07-55-00.jpg", "visibility": "clear" },
+    { "path": "2025-07-27/09-20-00.jpg", "visibility": "clear" },
+    { "path": "2025-12-29/09-05-00.jpg", "precipitation": "snow" },
+    { "path": "2025-12-29/17-57-30.jpg", "precipitation": "snow" },
+    { "path": "2025-12-29/16-30-00.jpg", "precipitation": "none" }
+  ]
+}
