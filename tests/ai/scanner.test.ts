@@ -145,9 +145,51 @@ describe("runAiScanOnce", () => {
     expect(mf.aiScannedAt).toBeNull(); // still retryable
     await run();
     mf = await prisma.mediaFile.findFirstOrThrow();
-    expect(mf.aiFailures).toBe(2);
+    // aiFailures resets to 0 on give-up (not left at maxFailures): the eligibility filter
+    // excludes aiFailures >= maxFailures unconditionally, so leaving it at maxFailures
+    // would make the frame permanently unreachable even after a prompt-version bump.
+    expect(mf.aiFailures).toBe(0);
     expect(mf.aiScannedAt).not.toBeNull(); // given up, loop moves on
     expect(mf.aiPeopleCount).toBeNull();
+  });
+
+  it("re-opens a given-up frame once the prompt version bumps", async () => {
+    await seed(1);
+    // Give up on the only frame under semantics-v1.
+    await runAiScanOnce({
+      prisma, opts: { ...OPTS, maxFailures: 1 }, control: control(),
+      deps: deps({ askSemantics: async () => { throw new FrameRejectedError("bad jpeg"); } }),
+    });
+    let mf = await prisma.mediaFile.findFirstOrThrow();
+    expect(mf.aiScannedAt).not.toBeNull();
+    expect(mf.aiFailures).toBe(0);
+
+    // A version bump must pick it back up rather than leaving it excluded forever by
+    // the aiFailures gate.
+    let calls = 0;
+    const res = await runAiScanOnce({
+      prisma, opts: { ...OPTS, maxFailures: 1, promptVersion: "semantics-v2" }, control: control(),
+      deps: deps({ askSemantics: async () => { calls++; return { peopleCount: 0, animals: [] }; } }),
+    });
+    expect(calls).toBe(1);
+    expect(res.scanned).toBe(1);
+    mf = await prisma.mediaFile.findFirstOrThrow();
+    expect(mf.aiPromptVersion).toBe("semantics-v2");
+  });
+
+  it("bounds a call by frames visited, not just frames successfully scanned", async () => {
+    // A read outage (unmounted volume, bad directory) makes loadJpeg throw for every
+    // frame. `scanned` never increments in that case, so only a visited-count bound
+    // stops one call from sweeping the whole table.
+    await seed(10);
+    const res = await runAiScanOnce({
+      prisma, opts: { ...OPTS, batch: 4 }, control: control(),
+      deps: deps({ loadJpeg: async () => { throw new Error("ENOENT"); } }),
+    });
+    expect(res.scanned).toBe(0);
+    expect(res.stopped).toBe("batch");
+    const touched = await prisma.mediaFile.count({ where: { aiFailures: { gt: 0 } } });
+    expect(touched).toBe(4);
   });
 
   it("re-scans frames whose prompt version is stale, and leaves current ones alone", async () => {

@@ -80,6 +80,14 @@ export async function runAiScanOnce(args: {
   const { prisma, opts, control, deps } = args;
   let scanned = 0;
   let weatherScanned = 0;
+  // Frames looked at this call, success or failure alike. `scanned` (successes only)
+  // cannot bound the walk: a read outage (unmounted media volume, one bad directory)
+  // makes loadJpeg throw for every frame, so a bound on successes never trips and a
+  // single call would sweep the entire ~209k-row archive, driving every frame to
+  // maxFailures and permanently excluding it — the exact "recorded as scanned, found
+  // nothing" outcome the transport/frame failure split exists to prevent, just reached
+  // through the file-read door instead of the model door. `visited` closes that door.
+  let visited = 0;
 
   if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
 
@@ -92,7 +100,7 @@ export async function runAiScanOnce(args: {
   let cursorTs = new Date("9999-12-31T23:59:59.999Z"); // far future: first page has no real cursor yet
   let cursorId = Number.MAX_SAFE_INTEGER;
 
-  while (scanned < opts.batch) {
+  while (visited < opts.batch) {
     if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
 
     const page = await prisma.mediaFile.findMany({
@@ -111,7 +119,7 @@ export async function runAiScanOnce(args: {
         ],
       },
       orderBy: [{ timestamp: "desc" }, { id: "desc" }],
-      take: Math.min(PAGE, opts.batch - scanned),
+      take: Math.min(PAGE, opts.batch - visited),
       select: { id: true, cameraId: true, localPath: true, timestamp: true },
     });
     if (page.length === 0) return { scanned, weatherScanned, stopped: "empty" };
@@ -120,6 +128,7 @@ export async function runAiScanOnce(args: {
       if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
       cursorTs = f.timestamp;
       cursorId = f.id;
+      visited++;
 
       let jpeg: Buffer;
       let night: boolean;
@@ -196,7 +205,7 @@ export async function runAiScanOnce(args: {
         }
       }
 
-      if (scanned >= opts.batch) return { scanned, weatherScanned, stopped: "batch" };
+      if (visited >= opts.batch) return { scanned, weatherScanned, stopped: "batch" };
     }
   }
 
@@ -212,10 +221,18 @@ async function bumpFailure(prisma: PrismaClient, id: number, opts: AiScanOptions
   if (row.aiFailures >= opts.maxFailures) {
     // Give up on this frame so the loop keeps making forward progress; still record
     // that it was looked at under the current model/prompt, so a version bump can
-    // give it another try later.
+    // give it another try later. aiFailures is reset here (not left at maxFailures):
+    // the eligibility filter below excludes aiFailures >= maxFailures unconditionally,
+    // so without this reset a stale-promptVersion re-open could never actually re-open
+    // the frame — it would keep failing the failure-count filter forever.
     await prisma.mediaFile.update({
       where: { id },
-      data: { aiScannedAt: new Date(), aiModel: opts.model, aiPromptVersion: opts.promptVersion },
+      data: {
+        aiScannedAt: new Date(),
+        aiModel: opts.model,
+        aiPromptVersion: opts.promptVersion,
+        aiFailures: 0,
+      },
     });
   }
 }
