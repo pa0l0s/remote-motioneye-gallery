@@ -38,6 +38,19 @@ describe("askWeather", () => {
     });
   });
 
+  it("falls back to a non-null value when a field is missing, instead of writing null", async () => {
+    // A silent no-op write: if visibility/precipitation came back undefined, Prisma skips
+    // that column entirely on write, so weatherScannedAt gets set (the frame is marked
+    // "asked") while weatherVisibility/weatherPrecipitation stay null forever -- the
+    // frame is never re-asked. Mirrors askSemantics's `?? 0` / `?? []` defensiveness.
+    const url = await serve(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ snow_on_ground: false }) } }],
+    }));
+    const r = await askWeather({ url, model: "m", timeoutMs: 2000 }, JPEG);
+    expect(r.visibility).toBe("unknown");
+    expect(r.precipitation).toBe("unknown");
+  });
+
   it("constrains the answer with enums and asks nothing else", async () => {
     const url = await serve(JSON.stringify({
       choices: [{ message: { content: JSON.stringify({

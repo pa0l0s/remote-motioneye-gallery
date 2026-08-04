@@ -27,7 +27,11 @@ async function main(): Promise<void> {
   const ask: AskOptions = {
     url: process.env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234",
     model: process.env.AI_MODEL ?? "qwen/qwen3-vl-8b",
-    timeoutMs: 60000,
+    // Honour AI_REQUEST_TIMEOUT_MS (same default as src/config.ts) rather than a
+    // hardcoded value: this gate is the branch's only regression guard, and a timeout
+    // shorter than what production actually tolerates makes it fail on frames that
+    // production would have handled fine (29-36 s measured under GPU contention).
+    timeoutMs: Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000"),
   };
   const width = Number(process.env.AI_IMAGE_WIDTH ?? "1024");
 

@@ -101,6 +101,33 @@ describe("runAiScanOnce", () => {
     expect(weatherCalls).toBe(3);
   });
 
+  it("bumping weatherPromptVersion re-samples instead of being blocked by old-version neighbours", async () => {
+    // Without weatherPromptVersion in the neighbour predicate, shouldAskWeather only ever
+    // checks weatherVisibility != null -- so once the archive is backfilled, EVERY window
+    // already has an old-version neighbour and a version bump does nothing at all.
+    await seed(10); // 10 frames, 150 s apart = 22.5 min span
+    await runAiScanOnce({
+      prisma, opts: OPTS, control: control(),
+      deps: deps({ askWeather: async () => ({ visibility: "clear", precipitation: "none", snowOnGround: false }) }),
+    });
+    const beforeCount = await prisma.mediaFile.count({ where: { weatherVisibility: { not: null } } });
+    expect(beforeCount).toBe(3); // only the sampled frames got a weatherVisibility written
+
+    let weatherCalls = 0;
+    await runAiScanOnce({
+      prisma,
+      opts: { ...OPTS, promptVersion: "semantics-v2", weatherPromptVersion: "weather-v2" },
+      control: control(),
+      deps: deps({
+        askWeather: async () => { weatherCalls++; return { visibility: "clear", precipitation: "none", snowOnGround: false }; },
+      }),
+    });
+    // Same sampling density as the first pass (3 of 10, 600 s gap over a 1350 s span) --
+    // NOT zero, which is what the old (pre-fix) predicate would have produced since every
+    // window already had a weather-v1-tagged neighbour.
+    expect(weatherCalls).toBe(3);
+  });
+
   it("never asks about the weather on night frames but still marks them", async () => {
     await seed(3);
     let weatherCalls = 0;

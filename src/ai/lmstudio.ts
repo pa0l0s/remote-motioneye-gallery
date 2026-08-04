@@ -142,8 +142,11 @@ export async function askWeather(opts: AskOptions, jpeg: Buffer): Promise<Weathe
     opts, jpeg, WEATHER_SYSTEM, WEATHER_USER, WEATHER_SCHEMA,
   );
   return {
-    visibility: raw.visibility,
-    precipitation: raw.precipitation,
+    // Same defensive style as askSemantics: an undefined field here would make Prisma
+    // skip the column on write, so weatherScannedAt gets set while weatherVisibility
+    // stays null forever -- the frame is marked "asked" and never re-asked.
+    visibility: raw.visibility ?? "unknown",
+    precipitation: raw.precipitation ?? "unknown",
     snowOnGround: !!raw.snow_on_ground,
   };
 }

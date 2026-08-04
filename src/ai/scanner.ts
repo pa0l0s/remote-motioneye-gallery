@@ -289,6 +289,12 @@ async function bumpFailure(prisma: PrismaClient, id: number, opts: AiScanOptions
  * without per-era configuration. The window is open (strict gt/lt) so a frame exactly
  * weatherMinGapSeconds away from its nearest sampled neighbour still gets asked, keeping
  * the achieved spacing close to, not double, the configured minimum.
+ *
+ * The neighbour must also match the CURRENT weatherPromptVersion. Without that, bumping
+ * the version (a wording change intended to be re-validated against `npm run ai:eval` and
+ * then rolled out) would never actually re-sample anything post-backfill: every window
+ * already has an old-version neighbour, so every frame would be skipped forever and the
+ * version bump would be a knob that does nothing.
  */
 async function shouldAskWeather(
   prisma: PrismaClient,
@@ -300,6 +306,7 @@ async function shouldAskWeather(
     where: {
       cameraId: f.cameraId,
       weatherVisibility: { not: null },
+      weatherPromptVersion: opts.weatherPromptVersion,
       timestamp: {
         gt: new Date(f.timestamp.getTime() - gapMs),
         lt: new Date(f.timestamp.getTime() + gapMs),
