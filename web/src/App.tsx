@@ -149,19 +149,36 @@ export function App() {
   // a whole session even after the model came up and started working. 20 s is loose
   // enough not to compete with ScanStatusTray's own /api/ai/status poll for freshness
   // that matters here (people/animal counts), while still updating within a session.
+  //
+  // Two things stop this from polling forever regardless of feature state, mirroring
+  // ScanStatusTray's own /api/ai/status loop: AI_TAGGING_ENABLED is a startup flag, not
+  // something that flips at runtime, so once a response reports enabled:false there is
+  // nothing left to catch and the timer stops entirely. And while enabled, the interval
+  // backs off to 60 s whenever the model isn't loaded (the owner's workstation being
+  // off is the common resting state, not something that needs 20 s-fresh polling) --
+  // but it keeps running, because the model coming back up must still be noticed.
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => {
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = () => {
       void api
         .aiStatus()
-        .then((s) => { if (!cancelled) setAiStatus(s); })
-        .catch(() => { if (!cancelled) setAiStatus(null); });
+        .then((s) => {
+          if (cancelled) return;
+          setAiStatus(s);
+          if (!s.enabled) return; // disabled at startup: nothing will ever change, stop polling
+          timer = setTimeout(poll, s.modelLoaded ? 20000 : 60000);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAiStatus(null);
+          timer = setTimeout(poll, 20000);
+        });
     };
-    refresh();
-    const timer = setInterval(refresh, 20000);
+    poll();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [pokes]);
 

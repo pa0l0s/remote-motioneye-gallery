@@ -20,6 +20,35 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   const localImage = { fileType: "image", isDownloaded: true } as const;
 
   app.get("/api/ai/status", async () => {
+    // AI_TAGGING_ENABLED is a startup config flag, not something that flips at runtime.
+    // When it's off, this endpoint is still polled (see web/src/App.tsx and
+    // ScanStatusTray) so the UI can learn that fact and stop polling itself -- but it
+    // must learn it WITHOUT paying for seven aggregate queries over the whole ~209k-row
+    // local-image table first. None of those aggregates lead with a cameraId equality,
+    // so each one is a table scan; on NAS-class hardware that competes directly with
+    // loop A's own indexing work for no purpose, since every count would be reported
+    // through a disabled/zeroed response anyway. The response shape is identical to the
+    // enabled path (same keys, zeroed/null values) so the client needs no special case.
+    if (!cfg.ai.enabled) {
+      return {
+        enabled: false,
+        paused: control?.paused ?? false,
+        scanning: false,
+        modelLoaded: false,
+        model: cfg.ai.model,
+        lastProbeAt: null,
+        totalLocalImages: 0,
+        scanned: 0,
+        pending: 0,
+        weatherScanned: 0,
+        withPeople: 0,
+        withAnimals: 0,
+        withWeather: 0,
+        avgLatencyMs: null,
+        lastError: null,
+      };
+    }
+
     const [total, scanned, weatherScanned, withPeople, withAnimals, withWeather, latency] =
       await Promise.all([
         prisma.mediaFile.count({ where: localImage }),
