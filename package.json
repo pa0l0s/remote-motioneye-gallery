@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "ai:eval": "tsx scripts/ai-eval.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.1",

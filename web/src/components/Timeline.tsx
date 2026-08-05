@@ -113,11 +113,13 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
               const h = 12 + (b.count / max) * 100;
               const active = b.bucket === activeBucket;
               const activityRatio = b.count > 0 ? b.activityCount / b.count : 0;
+              const peopleRatio = b.count > 0 ? b.peopleCount / b.count : 0;
+              const animalRatio = b.count > 0 ? b.animalCount / b.count : 0;
               return (
                 <button
                   key={b.bucket}
                   onClick={() => onBarClick(b.bucket)}
-                  title={`${b.bucket} · ${b.count} frames · ${b.activityCount} with activity`}
+                  title={`${b.bucket} · ${b.count} klatek · ruch ${b.activityCount} · osoby ${b.peopleCount} · zwierzęta ${b.animalCount}`}
                   className="group relative flex h-full shrink-0 flex-col items-center justify-end"
                   style={{ width: `${BAR_WIDTH}px` }}
                 >
@@ -133,6 +135,23 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
                       <span
                         className="absolute bottom-0 left-0 w-full bg-amber/80"
                         style={{ height: `${Math.max(8, activityRatio * 100)}%` }}
+                      />
+                    )}
+
+                    {/* Extended pass — drawn as narrow edge rails, not as another
+                        bottom-up fill, because the two passes are independent: a frame
+                        can be flagged by one, both or neither, and stacking would imply
+                        a total that does not exist. */}
+                    {!active && peopleRatio > 0 && (
+                      <span
+                        className="absolute bottom-0 left-0 w-[2px] bg-sky-400/90"
+                        style={{ height: `${Math.max(6, peopleRatio * 100)}%` }}
+                      />
+                    )}
+                    {!active && animalRatio > 0 && (
+                      <span
+                        className="absolute bottom-0 right-0 w-[2px] bg-emerald-400/90"
+                        style={{ height: `${Math.max(6, animalRatio * 100)}%` }}
                       />
                     )}
                   </span>

@@ -22,6 +22,9 @@ import { DownloadManager } from "./downloads/manager.js";
 import { registerDownloadRoutes } from "./routes/downloads.js";
 import { runActivityScanOnce, type ScanControl } from "./activity/scanner.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import { startAiRunner } from "./ai/runner.js";
+import { registerAiRoutes } from "./routes/ai.js";
+import type { AiScanControl } from "./ai/scanner.js";
 
 export async function buildApp() {
   const cfg = loadConfig();
@@ -87,7 +90,12 @@ export async function buildApp() {
   registerMediaRoutes(app, { prisma, ensureFile, ensureThumbFor });
   registerTimelineRoutes(app, { prisma });
   registerDownloadRoutes(app, { prisma, manager: downloads });
-  registerActivityRoutes(app, { prisma, control: scanControl, enabled: cfg.activity.enabled });
+  registerActivityRoutes(app, {
+    prisma,
+    control: scanControl,
+    enabled: cfg.activity.enabled,
+    scoreThreshold: cfg.activity.scoreThreshold,
+  });
 
   // Serve the built SPA (web/dist) with a history-API fallback.
   const staticDir = resolve(process.env.STATIC_DIR ?? "web/dist");
@@ -169,6 +177,22 @@ export async function buildApp() {
     };
     startIndexLoop(scanCycle, cfg.activity.intervalSeconds, (err) => app.log.error(err));
   }
+
+  // Extended pass — entirely separate from the activity loop above. Disabled by default;
+  // when enabled it idles harmlessly whenever the workstation is off (see aiRunnerTick).
+  // The runner only starts when enabled, but the routes are registered either way so the
+  // frontend gets a clean "disabled" status instead of a 404 when the pass is off.
+  let aiControl: AiScanControl | null = null;
+  if (cfg.ai.enabled) {
+    const ai = startAiRunner({
+      prisma,
+      cfg,
+      log: (msg, err) => app.log.warn({ err }, msg),
+    });
+    app.addHook("onClose", async () => ai.stop());
+    aiControl = ai.control;
+  }
+  registerAiRoutes(app, { prisma, control: aiControl, cfg });
 
   return app;
 }

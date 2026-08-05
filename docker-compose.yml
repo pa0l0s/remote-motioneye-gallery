@@ -34,6 +34,25 @@ services:
       ACTIVITY_SCORE_THRESHOLD: "${ACTIVITY_SCORE_THRESHOLD:-0.04}"
       ACTIVITY_PIXEL_THRESHOLD: "${ACTIVITY_PIXEL_THRESHOLD:-25}"
       ACTIVITY_COLOR_THRESHOLD: "${ACTIVITY_COLOR_THRESHOLD:-8}"
+      # Extended pass: semantic labels from a vision model in LM Studio on the workstation.
+      # Optional and OFF by default — the gallery is fully usable without it. When on, it
+      # probes every AI_PROBE_INTERVAL_SECONDS whether the model is loaded, and only then
+      # scans. All traffic is LAN; the GSM link is never touched.
+      AI_TAGGING_ENABLED: "${AI_TAGGING_ENABLED:-false}"
+      AI_LMSTUDIO_URL: "${AI_LMSTUDIO_URL:-http://192.168.0.11:1234}"
+      AI_MODEL: "${AI_MODEL:-qwen/qwen3-vl-8b}"
+      AI_PROBE_INTERVAL_SECONDS: "${AI_PROBE_INTERVAL_SECONDS:-300}"
+      AI_IMAGE_WIDTH: "${AI_IMAGE_WIDTH:-1024}"
+      AI_PROMPT_VERSION: "${AI_PROMPT_VERSION:-semantics-v1}"
+      AI_WEATHER_PROMPT_VERSION: "${AI_WEATHER_PROMPT_VERSION:-weather-v1}"
+      AI_WEATHER_MIN_GAP_SECONDS: "${AI_WEATHER_MIN_GAP_SECONDS:-600}"
+      AI_BATCH: "${AI_BATCH:-200}"
+      AI_REQUEST_TIMEOUT_MS: "${AI_REQUEST_TIMEOUT_MS:-120000}"
+      AI_MAX_FAILURES: "${AI_MAX_FAILURES:-5}"
+      # Loop B's own night/IR gate, deliberately separate from ACTIVITY_COLOR_THRESHOLD
+      # above: retuning loop A's motion-detection sensitivity must never silently change
+      # which frames loop B calls "night" (and therefore weather-scans).
+      AI_NIGHT_COLOR_THRESHOLD: "${AI_NIGHT_COLOR_THRESHOLD:-8}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"

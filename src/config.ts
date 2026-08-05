@@ -20,6 +20,28 @@ export interface AppConfig {
     scoreThreshold: number;
     maxGapSeconds: number;
   };
+  /** Extended pass — optional, driven by a vision model in LM Studio. */
+  ai: {
+    enabled: boolean;
+    lmStudioUrl: string;
+    model: string;
+    probeIntervalSeconds: number;
+    imageWidth: number;
+    promptVersion: string;
+    weatherPromptVersion: string;
+    weatherMinGapSeconds: number;
+    batch: number;
+    requestTimeoutMs: number;
+    maxFailures: number;
+    /**
+     * Own night/IR gate for loop B, separate from activity.colorThreshold. Retuning loop
+     * A's motion-detection sensitivity must never silently change which frames loop B
+     * calls "night" (and therefore weather-scans, and matches the `night` filter) — the
+     * two passes are independent products and this is the one place a loop-A action used
+     * to leak into loop-B output.
+     */
+    nightColorThreshold: number;
+  };
 }
 
 function required(env: Record<string, string | undefined>, key: string): string {
@@ -50,6 +72,21 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       colorThreshold: Number(env.ACTIVITY_COLOR_THRESHOLD ?? "8"),
       scoreThreshold: Number(env.ACTIVITY_SCORE_THRESHOLD ?? "0.04"),
       maxGapSeconds: Number(env.ACTIVITY_MAX_GAP_SECONDS ?? "900"),
+    },
+    ai: {
+      // Off by default: the extended pass is opt-in, the gallery is complete without it.
+      enabled: env.AI_TAGGING_ENABLED === "true",
+      lmStudioUrl: env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234",
+      model: env.AI_MODEL ?? "qwen/qwen3-vl-8b",
+      probeIntervalSeconds: Number(env.AI_PROBE_INTERVAL_SECONDS ?? "300"),
+      imageWidth: Number(env.AI_IMAGE_WIDTH ?? "1024"),
+      promptVersion: env.AI_PROMPT_VERSION ?? "semantics-v1",
+      weatherPromptVersion: env.AI_WEATHER_PROMPT_VERSION ?? "weather-v1",
+      weatherMinGapSeconds: Number(env.AI_WEATHER_MIN_GAP_SECONDS ?? "600"),
+      batch: Number(env.AI_BATCH ?? "200"),
+      requestTimeoutMs: Number(env.AI_REQUEST_TIMEOUT_MS ?? "120000"),
+      maxFailures: Number(env.AI_MAX_FAILURES ?? "5"),
+      nightColorThreshold: Number(env.AI_NIGHT_COLOR_THRESHOLD ?? "8"),
     },
   };
 }

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion } from "motion/react";
 import { api } from "./api";
-import type { Camera, HistogramBucket, MediaFile } from "./api";
+import type { AiStatus, Camera, HistogramBucket, MediaFile } from "./api";
 import { Thumb } from "./components/Thumb";
 import { Timeline } from "./components/Timeline";
 import { Lightbox } from "./components/Lightbox";
 import { TaskTray } from "./components/TaskTray";
 import { ScanStatusTray } from "./components/ScanStatusTray";
+import { DetectionFilter } from "./components/DetectionFilter";
 import { fmtDate } from "./lib/format";
 
 const GAP = 8;
@@ -25,7 +26,8 @@ export function App() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [pokes, setPokes] = useState(0);
-  const [activityOnly, setActivityOnly] = useState(false);
+  const [detections, setDetections] = useState<string[]>([]);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -40,13 +42,13 @@ export function App() {
   const loadFirstPage = useCallback(
     async (cam: Camera, from?: string) => {
       setLoading(true);
-      const page = await api.media(cam.id, { from, limit: 150, activityOnly });
+      const page = await api.media(cam.id, { from, limit: 150, detections });
       setItems(page.items);
       setCursor(page.nextCursor);
       setLoading(false);
       scrollRef.current?.scrollTo({ top: 0 });
     },
-    [activityOnly],
+    [detections],
   );
 
   useEffect(() => {
@@ -58,11 +60,11 @@ export function App() {
   const loadMore = useCallback(async () => {
     if (!camera || !cursor || loading) return;
     setLoading(true);
-    const page = await api.media(camera.id, { cursor, limit: 150, activityOnly });
+    const page = await api.media(camera.id, { cursor, limit: 150, detections });
     setItems((prev) => [...prev, ...page.items]);
     setCursor(page.nextCursor);
     setLoading(false);
-  }, [camera, cursor, loading, activityOnly]);
+  }, [camera, cursor, loading, detections]);
 
   // Re-fetch the current view (used after a download batch settles so cached flips on).
   const refreshView = useCallback(() => {
@@ -140,8 +142,52 @@ export function App() {
     [],
   );
 
-  const toggleActivityOnly = () => {
-    setActivityOnly((v) => !v);
+  // Drives the extended-pass filter group's availability and counts (DetectionFilter
+  // below). Refreshed on its own timer, not just on `pokes` (download jobs): loop B
+  // keeps labelling frames in the background whether or not the user ever downloads
+  // anything, so without this the filter group would stay dimmed with stale counts for
+  // a whole session even after the model came up and started working. 20 s is loose
+  // enough not to compete with ScanStatusTray's own /api/ai/status poll for freshness
+  // that matters here (people/animal counts), while still updating within a session.
+  //
+  // Two things stop this from polling forever regardless of feature state, mirroring
+  // ScanStatusTray's own /api/ai/status loop: AI_TAGGING_ENABLED is a startup flag, not
+  // something that flips at runtime, so once a response reports enabled:false there is
+  // nothing left to catch and the timer stops entirely. And while enabled, the interval
+  // backs off to 60 s whenever the model isn't loaded (the owner's workstation being
+  // off is the common resting state, not something that needs 20 s-fresh polling) --
+  // but it keeps running, because the model coming back up must still be noticed.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = () => {
+      void api
+        .aiStatus()
+        .then((s) => {
+          if (cancelled) return;
+          setAiStatus(s);
+          if (!s.enabled) return; // disabled at startup: nothing will ever change, stop polling
+          timer = setTimeout(poll, s.modelLoaded ? 20000 : 60000);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAiStatus(null);
+          timer = setTimeout(poll, 20000);
+        });
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pokes]);
+
+  // Changing which kinds are shown re-scopes the grid to "everything matching, from the
+  // top" — the previously selected day no longer describes what's on screen, so drop it.
+  // Otherwise the timeline keeps showing a stale day badge and "download day" would still
+  // target a day the user isn't looking at anymore.
+  const changeDetections = (next: string[]) => {
+    setDetections(next);
     setCurrentFrom(undefined);
     setActiveBucket(undefined);
   };
@@ -165,25 +211,17 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            onClick={toggleActivityOnly}
-            title="Show only frames where activity was detected"
-            className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] transition ${
-              activityOnly
-                ? "border-amber bg-amber/10 text-amber shadow-glow"
-                : "border-hairline text-muted hover:text-fg"
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <circle cx="12" cy="12" r="3" fill="currentColor" />
-            </svg>
-            activity{totalActivity > 0 ? ` · ${totalActivity.toLocaleString()}` : ""}
-          </button>
+          <DetectionFilter
+            selected={detections}
+            onChange={changeDetections}
+            counts={{
+              motion: totalActivity,
+              people: aiStatus?.withPeople ?? 0,
+              animal: aiStatus?.withAnimals ?? 0,
+            }}
+            aiAvailable={(aiStatus?.scanned ?? 0) > 0}
+            aiEnabled={aiStatus?.enabled ?? false}
+          />
           {cameras.length > 1 && (
             <select
               value={camera?.id}

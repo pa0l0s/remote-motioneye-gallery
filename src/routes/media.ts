@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient, MediaFile } from "@prisma/client";
+import { buildDetectionWhere, buildCoverageWhere } from "../media/detectionFilter.js";
 
 export interface MediaDeps {
   prisma: PrismaClient;
@@ -28,7 +29,16 @@ export function registerMediaRoutes(app: FastifyInstance, deps: MediaDeps): void
     const cur = q.cursor ? decodeCursor(q.cursor) : null;
 
     const where: Record<string, unknown> = { cameraId };
+    // Legacy single-purpose flag, kept so existing bookmarks keep working.
     if (q.activityOnly === "true") where.hasActivity = true;
+
+    const and: Record<string, unknown>[] = [];
+    const detections = buildDetectionWhere(q.detections);
+    if (detections) and.push(detections);
+    const coverage = buildCoverageWhere(q.scannedBy);
+    if (coverage) and.push(coverage);
+    if (and.length) where.AND = and;
+
     if (q.from || q.to) {
       where.timestamp = {
         ...(q.from ? { gte: new Date(q.from) } : {}),

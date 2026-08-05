@@ -12,6 +12,12 @@ beforeEach(async () => {
   await prisma.camera.deleteMany();
 });
 
+const app = () => {
+  const instance = Fastify();
+  registerTimelineRoutes(instance, { prisma });
+  return instance;
+};
+
 describe("GET /api/cameras/:id/histogram", () => {
   it("buckets counts by day", async () => {
     const cam = await prisma.camera.create({ data: { motionEyeId: 1, name: "Camera1" } });
@@ -36,6 +42,36 @@ describe("GET /api/cameras/:id/histogram", () => {
     const map = Object.fromEntries(buckets.map((b) => [b.bucket, b.count]));
     expect(map["2026-06-13"]).toBe(2);
     expect(map["2026-06-12"]).toBe(1);
+  });
+
+  it("counts both passes separately in one histogram row", async () => {
+    const cam = await prisma.camera.create({ data: { motionEyeId: 9, name: "Camera1" } });
+    const day = (h: number) => new Date(Date.UTC(2026, 0, 5, h, 0, 0));
+    const mk = (remotePath: string, hour: number, extra: object) =>
+      prisma.mediaFile.create({
+        data: {
+          cameraId: cam.id,
+          fileType: "image",
+          remotePath,
+          localPath: `/m/${remotePath}`,
+          timestamp: day(hour),
+          isDownloaded: true,
+          ...extra,
+        },
+      });
+    await mk("a.jpg", 1, { hasActivity: true });
+    await mk("b.jpg", 2, { aiPeopleCount: 2 });
+    await mk("c.jpg", 3, { aiAnimalKinds: ",bird,", weatherVisibility: "dense_fog" });
+    await mk("d.jpg", 4, {}); // nothing found by either pass
+
+    const a = app();
+    const res = await a.inject({ method: "GET", url: `/api/cameras/${cam.id}/histogram?bucket=day` });
+    const row = res.json()[0];
+    expect(row.count).toBe(4);
+    expect(row.activityCount).toBe(1);
+    expect(row.peopleCount).toBe(1);
+    expect(row.animalCount).toBe(1);
+    expect(row.weatherCount).toBe(1);
   });
 });
 
