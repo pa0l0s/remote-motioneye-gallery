@@ -29,3 +29,7 @@ dev.db*
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Measurement report — contains embedded photographs of the site and of people.
+# Kept locally and as a private artifact; never published to the public repository.
+docs/reports/
