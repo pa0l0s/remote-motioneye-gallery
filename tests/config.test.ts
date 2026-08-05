@@ -44,6 +44,15 @@ describe("loadConfig — extended pass", () => {
     expect(cfg.ai.requestTimeoutMs).toBe(120000);
     // Loop B's own night gate — must default independently of ACTIVITY_COLOR_THRESHOLD.
     expect(cfg.ai.nightColorThreshold).toBe(8);
+    // Autoload defaults on: the gallery loads the model itself unless told not to.
+    expect(cfg.ai.autoloadModel).toBe(true);
+    expect(cfg.ai.modelTtlSeconds).toBe(1800);
+  });
+
+  it("parses AI_AUTOLOAD_MODEL=false and a custom AI_MODEL_TTL_SECONDS", () => {
+    const cfg = loadConfig({ ...base, AI_AUTOLOAD_MODEL: "false", AI_MODEL_TTL_SECONDS: "600" });
+    expect(cfg.ai.autoloadModel).toBe(false);
+    expect(cfg.ai.modelTtlSeconds).toBe(600);
   });
 
   it("reads AI_NIGHT_COLOR_THRESHOLD independently of ACTIVITY_COLOR_THRESHOLD", () => {

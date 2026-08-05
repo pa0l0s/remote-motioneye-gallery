@@ -41,6 +41,19 @@ export interface AppConfig {
      * to leak into loop-B output.
      */
     nightColorThreshold: number;
+    /**
+     * When true (default), the gallery itself triggers LM Studio's just-in-time load for
+     * the configured model whenever it is reachable and listed but not yet resident —
+     * the owner no longer has to load it by hand. When false, the old behaviour is still
+     * reachable: only an already-loaded model counts.
+     */
+    autoloadModel: boolean;
+    /**
+     * TTL (seconds) attached to the request that triggers the JIT load, so LM Studio
+     * evicts the model and frees the GPU once the backfill goes idle rather than holding
+     * it resident forever. Only takes effect on the load-triggering request.
+     */
+    modelTtlSeconds: number;
   };
 }
 
@@ -87,6 +100,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       requestTimeoutMs: Number(env.AI_REQUEST_TIMEOUT_MS ?? "120000"),
       maxFailures: Number(env.AI_MAX_FAILURES ?? "5"),
       nightColorThreshold: Number(env.AI_NIGHT_COLOR_THRESHOLD ?? "8"),
+      autoloadModel: (env.AI_AUTOLOAD_MODEL ?? "true") !== "false",
+      modelTtlSeconds: Number(env.AI_MODEL_TTL_SECONDS ?? "1800"),
     },
   };
 }

@@ -4,7 +4,7 @@
  * The availability probe deliberately uses /api/v0/models rather than /v1/models:
  * with just-in-time loading enabled, /v1/models lists every *downloaded* model, so it
  * cannot tell us whether the model is actually resident on the GPU. /api/v0/models
- * carries a per-model `state` field, which is what the owner's on/off switch is.
+ * carries a per-model `state` field, which tells "loaded" apart from "available".
  */
 
 import { SEMANTICS_SYSTEM, SEMANTICS_USER, SEMANTICS_SCHEMA, WEATHER_SYSTEM, WEATHER_USER, WEATHER_SCHEMA } from "./prompts.js";
@@ -22,15 +22,76 @@ interface ModelsResponse {
 /**
  * True when the configured model is loaded and ready. Never throws: an unreachable
  * host means "the workstation is off", which is a normal state, not an error.
+ *
+ * Kept for existing callers/tests that only care about the loaded/not-loaded split.
+ * New code should use probeModelAvailable, which also distinguishes "downloaded but
+ * not resident" from "not on this host at all" -- the distinction that makes autoload
+ * possible.
  */
 export async function probeModelLoaded(opts: ProbeOptions): Promise<boolean> {
+  return (await probeModelAvailable(opts)) === "loaded";
+}
+
+/**
+ * Three-way read of the configured model's state on the LM Studio host:
+ *  - "loaded": resident and ready to answer immediately.
+ *  - "available": downloaded and listed, but not currently resident -- a JIT load
+ *    (ensureModelLoaded) would bring it up.
+ *  - "absent": either the model is not in the list, or the host could not be reached
+ *    at all (workstation off). Both collapse to the same value on purpose: from the
+ *    caller's point of view (aiRunnerTick) there is nothing to load in either case, so
+ *    the response is identical -- sleep until the next probe.
+ *
+ * Never throws: an unreachable host is the normal resting state whenever the owner's
+ * workstation is off, not an error, and a throw here would turn that into a
+ * crash-retry loop.
+ */
+export async function probeModelAvailable(opts: ProbeOptions): Promise<"loaded" | "available" | "absent"> {
   try {
     const res = await fetch(`${opts.url.replace(/\/+$/, "")}/api/v0/models`, {
       signal: AbortSignal.timeout(opts.timeoutMs),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return "absent";
     const json = (await res.json()) as ModelsResponse;
-    return (json.data ?? []).some((m) => m.id === opts.model && m.state === "loaded");
+    const entry = (json.data ?? []).find((m) => m.id === opts.model);
+    if (!entry) return "absent";
+    return entry.state === "loaded" ? "loaded" : "available";
+  } catch {
+    return "absent";
+  }
+}
+
+/**
+ * Triggers LM Studio's just-in-time load for the configured model by issuing one
+ * minimal request to /api/v0/chat/completions -- a single-word prompt capped at 1
+ * output token, purely to make the host load the model. Carries `ttl` (seconds) so
+ * LM Studio evicts the model again once it sits idle past that window, returning the
+ * GPU to the owner rather than holding it resident forever. `ttl` only takes effect on
+ * the request that causes the load, which this call always is by construction (callers
+ * only invoke this when probeModelAvailable reported "available", i.e. not yet loaded).
+ *
+ * Deliberately separate from askJson/askSemantics/askWeather: this call exists only to
+ * warm the model, not to ask it anything real, and it targets /api/v0/... (which
+ * accepts `ttl`) rather than /v1/... (the endpoint the scanning path is validated
+ * against and must not move off of).
+ *
+ * Never throws: a failed load attempt just means the model stays unloaded this tick;
+ * the runner falls back to sleeping like a genuinely absent host.
+ */
+export async function ensureModelLoaded(opts: ProbeOptions, ttlSeconds: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${opts.url.replace(/\/+$/, "")}/api/v0/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(opts.timeoutMs),
+      body: JSON.stringify({
+        model: opts.model,
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 1,
+        ttl: ttlSeconds,
+      }),
+    });
+    return res.ok;
   } catch {
     return false;
   }

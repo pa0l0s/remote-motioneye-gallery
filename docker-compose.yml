@@ -53,6 +53,13 @@ services:
       # above: retuning loop A's motion-detection sensitivity must never silently change
       # which frames loop B calls "night" (and therefore weather-scans).
       AI_NIGHT_COLOR_THRESHOLD: "${AI_NIGHT_COLOR_THRESHOLD:-8}"
+      # When true (default), the gallery triggers LM Studio's JIT load itself whenever the
+      # model is reachable and downloaded but not resident, instead of waiting for the
+      # owner to load it by hand. AI_MODEL_TTL_SECONDS is attached to that load-triggering
+      # request so LM Studio evicts the model (and frees the GPU) once idle past that many
+      # seconds -- the owner shares the GPU with other work.
+      AI_AUTOLOAD_MODEL: "${AI_AUTOLOAD_MODEL:-true}"
+      AI_MODEL_TTL_SECONDS: "${AI_MODEL_TTL_SECONDS:-1800}"
     volumes:
       # App data (sqlite, logs, thumbnails). Owned by the app.
       - "${CONFIG_DIR:-./data}:/config"

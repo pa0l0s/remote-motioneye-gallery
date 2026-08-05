@@ -68,7 +68,8 @@ def env_pairs():
             "AI_TAGGING_ENABLED","AI_LMSTUDIO_URL","AI_MODEL","AI_PROBE_INTERVAL_SECONDS",
             "AI_IMAGE_WIDTH","AI_PROMPT_VERSION","AI_WEATHER_PROMPT_VERSION",
             "AI_WEATHER_MIN_GAP_SECONDS","AI_BATCH","AI_REQUEST_TIMEOUT_MS",
-            "AI_MAX_FAILURES","AI_NIGHT_COLOR_THRESHOLD"]
+            "AI_MAX_FAILURES","AI_NIGHT_COLOR_THRESHOLD",
+            "AI_AUTOLOAD_MODEL","AI_MODEL_TTL_SECONDS"]
     out = []
     for k in keys:
         v = os.environ.get(k)

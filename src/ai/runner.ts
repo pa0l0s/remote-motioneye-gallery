@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import sharp from "sharp";
 import type { AppConfig } from "../config.js";
-import { probeModelLoaded, askSemantics, askWeather, type AskOptions } from "./lmstudio.js";
+import { probeModelAvailable, ensureModelLoaded, askSemantics, askWeather, type AskOptions } from "./lmstudio.js";
 import { isNightFrame } from "./night.js";
 import { runAiScanOnce, type AiScanControl, type AiScanResult } from "./scanner.js";
 
@@ -13,7 +13,18 @@ export interface AiRunnerState {
 }
 
 export interface TickDeps {
-  probe: () => Promise<boolean>;
+  probe: () => Promise<"loaded" | "available" | "absent">;
+  /**
+   * Triggers LM Studio's JIT load. Only ever called when the probe reported "available"
+   * and autoloadModel is on -- "absent" has nothing to load, and "loaded" needs no
+   * loading.
+   */
+  ensureLoaded: () => Promise<boolean>;
+  /**
+   * When false, only "loaded" counts, reproducing the old manual-load-only behaviour:
+   * "available" is treated the same as "absent" and the runner just keeps sleeping.
+   */
+  autoloadModel: boolean;
   scan: () => Promise<AiScanResult>;
   probeIntervalMs: number;
   now: number;
@@ -36,8 +47,20 @@ export async function aiRunnerTick(state: AiRunnerState, deps: TickDeps): Promis
     if (!dueForProbe) return;
     state.lastProbeMs = deps.now;
     state.control.lastProbeAt = new Date(deps.now);
-    state.control.modelLoaded = await deps.probe();
+    const probeResult = await deps.probe();
     state.backlogEmpty = false;
+    if (probeResult === "loaded") {
+      state.control.modelLoaded = true;
+    } else if (probeResult === "available" && deps.autoloadModel) {
+      // Downloaded but not resident, and we're allowed to fix that ourselves: trigger
+      // the JIT load. A failed attempt leaves modelLoaded false, same as "absent" --
+      // the next probe will simply try again.
+      state.control.modelLoaded = await deps.ensureLoaded();
+    } else {
+      // Either genuinely absent, or "available" with autoload turned off -- the old
+      // manual-load-only behaviour stays reachable by configuration.
+      state.control.modelLoaded = false;
+    }
     if (!state.control.modelLoaded) return;
     // The model is back: a stale error from a past outage would otherwise pin
     // /api/ai/status to "failed" long after recovery.
@@ -96,7 +119,12 @@ export function startAiRunner(args: {
     if (stopped) return;
     try {
       await aiRunnerTick(state, {
-        probe: () => probeModelLoaded({ ...ask, timeoutMs: 5000 }),
+        probe: () => probeModelAvailable({ ...ask, timeoutMs: 5000 }),
+        // The JIT load itself (not just the health check) can take several seconds
+        // (measured ~8s from unloaded to a 200 response), so this needs a longer
+        // timeout than the plain probe above.
+        ensureLoaded: () => ensureModelLoaded({ ...ask, timeoutMs: 30000 }, cfg.ai.modelTtlSeconds),
+        autoloadModel: cfg.ai.autoloadModel,
         scan: () =>
           runAiScanOnce({
             prisma,
