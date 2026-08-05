@@ -247,6 +247,36 @@ describe("runAiScanOnce", () => {
     expect(ctl.lastError).toMatch(/ENOENT/);
   });
 
+  it("does NOT abort on a single-frame page whose read fails -- bumps aiFailures and eventually gives up like any other bad frame", async () => {
+    // Steady-state backfill: the pending backlog is 1-2 frames (one new frame every
+    // ~150 s against a 5 s runner tick), so a page of exactly one frame is the common
+    // case, not an edge case. A single failed read on a page that size must NOT be
+    // treated as an environment fault (see MIN_PAGE_FOR_OUTAGE in scanner.ts) -- if it
+    // were, this one corrupt/zero-byte frame would abort every call forever, its
+    // aiFailures would never increment, it would never reach maxFailures, and loop B
+    // would stall on it permanently.
+    await seed(1);
+    const run = () => runAiScanOnce({
+      prisma, opts: { ...OPTS, maxFailures: 2 }, control: control(),
+      deps: deps({ loadJpeg: async () => { throw new Error("ENOENT: no such file or directory"); } }),
+    });
+
+    const res1 = await run();
+    expect(res1.stopped).not.toBe("unavailable");
+    let mf = await prisma.mediaFile.findFirstOrThrow();
+    expect(mf.aiFailures).toBe(1);
+    expect(mf.aiScannedAt).toBeNull(); // still retryable
+
+    const res2 = await run();
+    expect(res2.stopped).not.toBe("unavailable");
+    mf = await prisma.mediaFile.findFirstOrThrow();
+    // Gave up after maxFailures, exactly like a bad frame did before the regression --
+    // aiFailures resets to 0 (see the give-up comment in bumpFailure) and aiScannedAt is
+    // set so the loop moves on instead of retrying this frame forever.
+    expect(mf.aiFailures).toBe(0);
+    expect(mf.aiScannedAt).not.toBeNull();
+  });
+
   it("still bumps aiFailures per-frame when only SOME reads in a page fail", async () => {
     // The mount is fine; a handful of frames are individually unreadable (e.g. corrupt
     // JPEGs). That is the ordinary per-frame failure path, not an environment fault, so

@@ -53,6 +53,10 @@ export interface AiScanResult {
 
 const PAGE = 50;
 
+// See the comment at the call site (the whole-page read-failure check) for why 2, not 1
+// or PAGE, is the right floor.
+const MIN_PAGE_FOR_OUTAGE = 2;
+
 /**
  * Extended pass ("loop B"). Walks locally-cached image frames NEWEST FIRST and labels them
  * with a vision model. Independent of the basic differencing pass ("loop A") in every
@@ -72,11 +76,15 @@ const PAGE = 50;
  *    workstation is switched off mid-backfill would silently record the entire remaining
  *    archive as "scanned, found nothing" — a data-destroying false negative.
  *  - A local file read failure (loadJpeg/isNight throwing) for EVERY frame in a fetched
- *    page means the media mount itself is gone (unmounted NAS bind, dropped volume) —
- *    an environment fault, not 50-or-200 individually corrupt JPEGs. Each page is read in
- *    full before anything is written; if every read in it failed, the call aborts exactly
- *    like ModelUnavailableError — nothing marked, control.lastError bound from the read
- *    error — instead of burning every frame's aiFailures down to "scanned, found nothing".
+ *    page of at least MIN_PAGE_FOR_OUTAGE frames means the media mount itself is gone
+ *    (unmounted NAS bind, dropped volume) — an environment fault, not several individually
+ *    corrupt JPEGs. Each page is read in full before anything is written; if every read in
+ *    a page that size or larger failed, the call aborts exactly like ModelUnavailableError
+ *    — nothing marked, control.lastError bound from the read error — instead of burning
+ *    every frame's aiFailures down to "scanned, found nothing". A page smaller than that
+ *    (the steady-state trickle once the backfill is caught up: one new frame every ~150 s
+ *    against a 5 s runner tick) cannot tell "mount is gone" from "this one frame is bad",
+ *    so it falls through to the ordinary per-frame path below instead.
  *  - FrameRejectedError, or a read failure for only SOME frames in a page (the ordinary
  *    "one corrupt JPEG among many good ones" case), means this one frame is unusable. It
  *    counts against that frame's aiFailures only; once aiFailures reaches maxFailures the
@@ -153,7 +161,19 @@ export async function runAiScanOnce(args: {
         reads.push({ f, jpeg: null, night: null, error: e });
       }
     }
-    if (reads.every((r) => r.error !== null)) {
+    // A page of exactly one frame can never distinguish "environment fault" from "one
+    // corrupt JPEG": once the backfill drains to the steady-state trickle (one new frame
+    // every ~150 s against a 5 s runner tick), pages are routinely length 1, and treating
+    // a single failed read as proof the media mount is gone would abort forever on a
+    // single bad frame -- that frame's aiFailures never increments, it never reaches
+    // maxFailures, and loop B stalls permanently while reporting "model niedostepny".
+    // MIN_PAGE_FOR_OUTAGE=2 is the smallest floor that still tells the two cases apart:
+    // two-or-more INDEPENDENTLY SELECTED frames (different timestamps, different files on
+    // disk) failing for the same underlying reason is what an unmounted volume or dropped
+    // bind mount looks like; a single failed read is what one corrupt JPEG looks like.
+    // Below that floor, fall through to the ordinary per-frame handling below so a
+    // genuinely bad frame drains through bumpFailure/maxFailures exactly as designed.
+    if (page.length >= MIN_PAGE_FOR_OUTAGE && reads.every((r) => r.error !== null)) {
       const lastError = reads[reads.length - 1].error;
       control.modelLoaded = false;
       control.lastError = lastError instanceof Error ? lastError.message : String(lastError);
