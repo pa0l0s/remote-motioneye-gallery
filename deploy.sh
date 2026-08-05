@@ -57,10 +57,18 @@ def req(method, path, body=None, timeout=600):
         return e.code, e.read().decode()[:300]
 
 def env_pairs():
+    # Only keys listed here reach the stack. A variable missing from this list silently
+    # falls back to the compose default, so anything added to docker-compose.yml that an
+    # operator is meant to override must be added here too.
     keys = ["GALLERY_PORT","AUTH_ENABLED","MOTIONEYE_URL","MOTIONEYE_USER",
             "MOTIONEYE_PASSWORD","SECRET_KEY","KUKLE_POWER_LOGIN_URL","CONFIG_DIR",
             "MEDIA_ROOT","MEDIA_RO_SUFFIX","REMOTE_CONCURRENCY","INDEX_EMPTY_DAY_LIMIT",
-            "INDEX_START_DATE"]
+            "INDEX_START_DATE","INDEX_RECENT_DAYS",
+            # Extended pass (loop B) — optional, off unless AI_TAGGING_ENABLED is "true".
+            "AI_TAGGING_ENABLED","AI_LMSTUDIO_URL","AI_MODEL","AI_PROBE_INTERVAL_SECONDS",
+            "AI_IMAGE_WIDTH","AI_PROMPT_VERSION","AI_WEATHER_PROMPT_VERSION",
+            "AI_WEATHER_MIN_GAP_SECONDS","AI_BATCH","AI_REQUEST_TIMEOUT_MS",
+            "AI_MAX_FAILURES","AI_NIGHT_COLOR_THRESHOLD"]
     out = []
     for k in keys:
         v = os.environ.get(k)
