@@ -199,7 +199,11 @@ export function App() {
   return (
     <div className="atmosphere grain relative flex h-full flex-col">
       {/* ---- Header ---- */}
-      <header className="relative z-10 flex items-center justify-between border-b border-hairline px-6 py-4">
+      {/* z-20, one above the sibling sections below: they are all `relative z-10`, so as
+          later siblings they would paint over anything the header overlays — including the
+          detection-filter popover, whose own z-index only applies inside this header's
+          stacking context. The fixed trays sit at z-40 and still win, as they should. */}
+      <header className="relative z-20 flex items-center justify-between border-b border-hairline px-6 py-4">
         <div className="flex items-baseline gap-4">
           <h1 className="font-display text-2xl font-extrabold tracking-tight text-fg">
             NIGHT<span className="text-amber">·</span>WATCH
