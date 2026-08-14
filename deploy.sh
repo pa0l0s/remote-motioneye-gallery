@@ -64,6 +64,10 @@ def env_pairs():
             "MOTIONEYE_PASSWORD","SECRET_KEY","KUKLE_POWER_LOGIN_URL","CONFIG_DIR",
             "MEDIA_ROOT","MEDIA_RO_SUFFIX","REMOTE_CONCURRENCY","INDEX_EMPTY_DAY_LIMIT",
             "INDEX_START_DATE","INDEX_RECENT_DAYS",
+            # Basic pass (loop A) — tuning knobs. Without these the stack silently keeps
+            # the compose defaults, so a threshold change in deploy.local.env does nothing.
+            "ACTIVITY_DETECTION_ENABLED","ACTIVITY_SCAN_INTERVAL_SECONDS","ACTIVITY_SCAN_BATCH",
+            "ACTIVITY_SCORE_THRESHOLD","ACTIVITY_PIXEL_THRESHOLD","ACTIVITY_COLOR_THRESHOLD",
             # Extended pass (loop B) — optional, off unless AI_TAGGING_ENABLED is "true".
             "AI_TAGGING_ENABLED","AI_LMSTUDIO_URL","AI_MODEL","AI_PROBE_INTERVAL_SECONDS",
             "AI_IMAGE_WIDTH","AI_PROMPT_VERSION","AI_WEATHER_PROMPT_VERSION",
