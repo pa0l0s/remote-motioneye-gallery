@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { HistogramBucket } from "../api";
 
 interface TimelineProps {
@@ -45,6 +45,31 @@ export function Timeline({ buckets, activeBucket, onPick }: TimelineProps) {
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
+
+  // Open on the newest day rather than the oldest. Bars run oldest-to-newest, so a fresh
+  // load sits at scrollLeft 0 — nearly two years to the left of anything the owner wants
+  // to look at, every single time.
+  //
+  // Keyed on the oldest bucket, which identifies the dataset: the histogram is refetched
+  // whenever the scan makes progress or a download job changes, and those refreshes must
+  // never yank a reader who has scrolled back into history. A different camera brings a
+  // different oldest day and is repositioned as a genuinely new dataset.
+  //
+  // useLayoutEffect, not useEffect: this runs before paint, so the timeline never flashes
+  // at the far-left edge before jumping.
+  const positionedFor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || buckets.length === 0) return;
+    const dataset = buckets[0].bucket;
+    if (positionedFor.current === dataset) return;
+    positionedFor.current = dataset;
+    // An explicit day was already chosen (deep link, restored state); the effect below
+    // owns the scroll position in that case. Marking the dataset above still stops this
+    // from firing later and stealing the position.
+    if (activeBucket) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [buckets, activeBucket]);
 
   // Keep the active day visible: when it changes (e.g. driven by grid scroll) and the
   // bar is off-screen, bring it into view without fighting a manual horizontal scroll.
