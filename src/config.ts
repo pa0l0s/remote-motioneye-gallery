@@ -92,14 +92,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       lmStudioUrl: env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234",
       model: env.AI_MODEL ?? "qwen/qwen3-vl-8b",
       probeIntervalSeconds: Number(env.AI_PROBE_INTERVAL_SECONDS ?? "300"),
-      // Stays at 1024 despite a known cost: a spider on the lens is told from a bird by
-      // its thin radiating legs, and downscaling 1920px frames to 1024 destroys exactly
-      // that detail. Measured 2026-08-19 on 2026-05-24/05-30-00 — "bird" at 1024 (3/3
-      // runs), "spider" at 1440 and 1920 (2/2 each), warm latency identical (2082 vs
-      // 2078 ms). But sustained 1440px traffic made LM Studio return HTTP 400 and then
-      // die mid-run, twice, where 1024 ran dozens of calls clean. Do not raise this
-      // without first giving the host VRAM headroom (the model is loaded with a 262144
-      // context) and re-running scripts/ai-eval.ts end to end.
+      // Do not raise this without measuring. Sustained 1440px traffic made LM Studio
+      // return HTTP 400 and then die mid-run, twice, where 1024 ran dozens of calls
+      // clean — suspected VRAM pressure (the model had been loaded with a 262144
+      // context). Warm latency at 1440 was otherwise identical (2082 vs 2078 ms).
+      //
+      // A caution about attributing detection quality to this number: the small dawn
+      // spider in 2026-05-24/05-30-00 read as "bird" 3/3 at 1024 and "spider" at 1440
+      // and 1920, which looked like a clean resolution effect. After LM Studio was
+      // restarted and the model reloaded, the same frame at 1024 answered "spider" 5/5.
+      // Answers are repeatable within one model-load session but not necessarily across
+      // reloads, so measure inside the session you care about.
       imageWidth: Number(env.AI_IMAGE_WIDTH ?? "1024"),
       promptVersion: env.AI_PROMPT_VERSION ?? "semantics-v2",
       weatherPromptVersion: env.AI_WEATHER_PROMPT_VERSION ?? "weather-v1",

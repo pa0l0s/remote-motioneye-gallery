@@ -10,6 +10,18 @@
 
 import { SPIDER_ONLY_KINDS } from "../ai/normalize.js";
 
+/**
+ * What "fog" means when filtering. The model's 4-point visibility scale has an unstable
+ * top step: measured 2026-08-19, the same frame comes back "fog" or "dense_fog" depending
+ * only on the resize width (2025-09-26/06-27-30: fog at 640/1024/1536, dense_fog at
+ * 1280/1920), with zero run-to-run variation at any fixed width. What IS stable is the
+ * binary underneath — whether the background is gone. Requiring "dense_fog" alone made the
+ * filter miss the two thickest fogs in the archive. Widening is safe rather than noisy:
+ * across 1341 weather-labelled frames the model answered clear 1336, fog 3, dense_fog 2,
+ * and never once slight_haze.
+ */
+export const FOG_VISIBILITY = ["fog", "dense_fog"] as const;
+
 type Where = Record<string, unknown>;
 
 // Must stay in step with the SPECIES list in src/ai/normalize.ts — adding a species means
@@ -27,7 +39,7 @@ function clauseFor(kind: string): Where | null {
   if (kind === "animal") {
     return { AND: [{ aiAnimalKinds: { not: null } }, { aiAnimalKinds: { not: SPIDER_ONLY_KINDS } }] };
   }
-  if (kind === "fog") return { weatherVisibility: "dense_fog" };
+  if (kind === "fog") return { weatherVisibility: { in: [...FOG_VISIBILITY] } };
   if (kind === "snow") return { weatherPrecipitation: "snow" };
   if (kind === "snow_ground") return { weatherSnowOnGround: true };
   if (kind === "night") return { isNightIr: true };

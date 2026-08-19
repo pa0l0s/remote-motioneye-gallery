@@ -27,7 +27,7 @@ const EXTENDED = [
   // rather than in the scene, so "zwierzę — dowolne" deliberately does not match it and
   // this is the only way to see those frames.
   { id: "animal:spider", label: "pająk na obiektywie" },
-  { id: "fog", label: "gęsta mgła" },
+  { id: "fog", label: "mgła" },
   { id: "snow", label: "opad śniegu" },
   { id: "snow_ground", label: "śnieg na ziemi" },
   { id: "night", label: "noc (podczerwień)" },

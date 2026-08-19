@@ -23,11 +23,19 @@ describe("buildDetectionWhere", () => {
     expect(buildDetectionWhere("animal,fog,snow,snow_ground,night")).toEqual({
       OR: [
         { AND: [{ aiAnimalKinds: { not: null } }, { aiAnimalKinds: { not: ",spider," } }] },
-        { weatherVisibility: "dense_fog" },
+        { weatherVisibility: { in: ["fog", "dense_fog"] } },
         { weatherPrecipitation: "snow" },
         { weatherSnowOnGround: true },
         { isNightIr: true },
       ],
+    });
+  });
+
+  it("treats fog as the binary 'background gone', not the scale's top step", () => {
+    // The model splits these two labels on resize width rather than on the weather, so a
+    // filter requiring dense_fog alone missed the thickest fogs in the archive.
+    expect(buildDetectionWhere("fog")).toEqual({
+      OR: [{ weatherVisibility: { in: ["fog", "dense_fog"] } }],
     });
   });
 

@@ -8,6 +8,11 @@ import { fmtTime } from "../lib/format";
  *  spider is badged in grey, not as an animal in the scene. */
 const SPIDER_ONLY_KINDS = ",spider,";
 
+/** Mirrors FOG_VISIBILITY in src/media/detectionFilter.ts: the model's split between
+ *  "fog" and "dense_fog" tracks the resize width rather than the weather, so the badge
+ *  follows the stable binary — is the background gone. */
+const isFog = (v: string | null | undefined) => v === "fog" || v === "dense_fog";
+
 interface ThumbProps {
   media: MediaFile;
   onOpen: (m: MediaFile) => void;
@@ -175,9 +180,9 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
           )}
         </div>
       )}
-      {(media.weatherVisibility === "dense_fog" || media.weatherPrecipitation === "snow") && (
+      {(isFog(media.weatherVisibility) || media.weatherPrecipitation === "snow") && (
         <div className="pointer-events-none absolute top-1.5 left-8 z-10 flex items-center gap-1">
-          {media.weatherVisibility === "dense_fog" && (
+          {isFog(media.weatherVisibility) && (
             <span className="rounded-sm bg-slate-300/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink">
               mgła
             </span>

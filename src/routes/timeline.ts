@@ -33,7 +33,7 @@ export function registerTimelineRoutes(app: FastifyInstance, deps: TimelineDeps)
              SUM(CASE WHEN aiPeopleCount > 0 THEN 1 ELSE 0 END) AS peopleCount,
              SUM(CASE WHEN aiAnimalKinds IS NOT NULL
                        AND aiAnimalKinds <> ${SPIDER_ONLY_KINDS} THEN 1 ELSE 0 END) AS animalCount,
-             SUM(CASE WHEN weatherVisibility = 'dense_fog'
+             SUM(CASE WHEN weatherVisibility IN ('fog','dense_fog')
                         OR weatherPrecipitation IN ('snow','heavy_rain') THEN 1 ELSE 0 END) AS weatherCount
       FROM MediaFile
       WHERE cameraId = ${cameraId}

@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { AppConfig } from "../config.js";
 import type { AiScanControl } from "../ai/scanner.js";
 import { SPIDER_ONLY_KINDS } from "../ai/normalize.js";
+import { FOG_VISIBILITY } from "../media/detectionFilter.js";
 
 export interface AiRouteDeps {
   prisma: PrismaClient;
@@ -72,7 +73,10 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         prisma.mediaFile.count({
           where: {
             ...localImage,
-            OR: [{ weatherVisibility: "dense_fog" }, { weatherPrecipitation: { in: ["snow", "heavy_rain"] } }],
+            OR: [
+              { weatherVisibility: { in: [...FOG_VISIBILITY] } },
+              { weatherPrecipitation: { in: ["snow", "heavy_rain"] } },
+            ],
           },
         }),
         prisma.mediaFile.aggregate({

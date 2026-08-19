@@ -115,14 +115,22 @@ async function main(): Promise<void> {
         const t0 = Date.now();
         const r = await askWeather(ask, await jpeg(w.path));
         wLatencies.push(Date.now() - t0);
-        if (w.visibility === "dense_fog") { fogTotal++; if (r.visibility === "dense_fog") fogHit++; }
+        // Scored as the binary "is the background gone", not on the scale's top step.
+        // The fog/dense_fog boundary tracks the resize width rather than the weather
+        // (see FOG_VISIBILITY in src/media/detectionFilter.ts), so gating on "dense_fog"
+        // tested the resampler. The clear references are scored too — before this they
+        // were read from the fixture but never checked, which would have left the
+        // widened accept-set guarding nothing in the other direction.
+        const gone = (v: string) => v === "fog" || v === "dense_fog";
+        if (w.visibility === "dense_fog") { fogTotal++; if (gone(r.visibility)) fogHit++; }
+        if (w.visibility === "clear") { fogTotal++; if (!gone(r.visibility)) fogHit++; }
         if (w.precipitation === "snow") { snowTotal++; if (r.precipitation === "snow") snowHit++; }
         if (w.precipitation === "none") { snowTotal++; if (r.precipitation === "none") snowHit++; }
         console.log(`${w.path.padEnd(28)} visibility=${r.visibility} precipitation=${r.precipitation}`);
       } catch (e) {
         if (e instanceof ModelUnavailableError) modelWentAway(w.path, e);
         console.error(`SKIP ${w.path}: ${e instanceof Error ? e.message : String(e)}`);
-        if (w.visibility === "dense_fog") fogTotal++;
+        if (w.visibility === "dense_fog" || w.visibility === "clear") fogTotal++;
         if (w.precipitation === "snow" || w.precipitation === "none") snowTotal++;
       }
     }
@@ -147,7 +155,7 @@ async function main(): Promise<void> {
     ["invented animals", animalNegTotal > 0 && animalInvented === 0, `${animalInvented}/${animalNegTotal}`],
     ["lens spider labelled", spiderTotal > 0 && spiderHit === spiderTotal, `${spiderHit}/${spiderTotal}`],
     ["spider taken for an animal", spiderTotal > 0 && spiderAsAnimal === 0, `${spiderAsAnimal}/${spiderTotal}`],
-    ["dense fog", fogTotal > 0 && fogHit === fogTotal, `${fogHit}/${fogTotal}`],
+    ["fog vs clear", fogTotal > 0 && fogHit === fogTotal, `${fogHit}/${fogTotal}`],
     ["snow", snowTotal > 0 && snowHit === snowTotal, `${snowHit}/${snowTotal}`],
     ["semantic latency <= 2000 ms", latencies.length > 0 && (median(latencies) as number) <= 2000, fmtMs(latencies)],
     ["weather latency <= 4000 ms", wLatencies.length > 0 && (median(wLatencies) as number) <= 4000, fmtMs(wLatencies)],
