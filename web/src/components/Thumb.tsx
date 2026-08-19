@@ -4,6 +4,10 @@ import type { MediaFile } from "../api";
 import { api } from "../api";
 import { fmtTime } from "../lib/format";
 
+/** Mirrors SPIDER_ONLY_KINDS in src/ai/normalize.ts: a frame whose only label is the lens
+ *  spider is badged in grey, not as an animal in the scene. */
+const SPIDER_ONLY_KINDS = ",spider,";
+
 interface ThumbProps {
   media: MediaFile;
   onOpen: (m: MediaFile) => void;
@@ -155,10 +159,18 @@ export function Thumb({ media, onOpen, selected, onToggleSelect }: ThumbProps) {
           )}
           {media.aiAnimalKinds && (
             <span
-              className="rounded-sm bg-emerald-400/90 px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink"
-              title={`zwierzę: ${media.aiAnimalKinds.replaceAll(",", " ").trim()}`}
+              className={`rounded-sm px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-ink ${
+                media.aiAnimalKinds === SPIDER_ONLY_KINDS ? "bg-slate-400/90" : "bg-emerald-400/90"
+              }`}
+              title={
+                media.aiAnimalKinds === SPIDER_ONLY_KINDS
+                  ? "pająk na obiektywie — nie liczy się jako zwierzę w kadrze"
+                  : `zwierzę: ${media.aiAnimalKinds.replaceAll(",", " ").trim()}`
+              }
             >
-              {media.aiAnimalKinds.split(",").filter(Boolean)[0]}
+              {media.aiAnimalKinds === SPIDER_ONLY_KINDS
+                ? "pająk"
+                : media.aiAnimalKinds.split(",").filter(Boolean)[0]}
             </span>
           )}
         </div>

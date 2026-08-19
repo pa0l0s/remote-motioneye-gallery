@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { SPIDER_ONLY_KINDS } from "../ai/normalize.js";
 
 export interface TimelineDeps {
   prisma: PrismaClient;
@@ -30,7 +31,8 @@ export function registerTimelineRoutes(app: FastifyInstance, deps: TimelineDeps)
              COUNT(*) AS count,
              SUM(CASE WHEN hasActivity THEN 1 ELSE 0 END) AS activityCount,
              SUM(CASE WHEN aiPeopleCount > 0 THEN 1 ELSE 0 END) AS peopleCount,
-             SUM(CASE WHEN aiAnimalKinds IS NOT NULL THEN 1 ELSE 0 END) AS animalCount,
+             SUM(CASE WHEN aiAnimalKinds IS NOT NULL
+                       AND aiAnimalKinds <> ${SPIDER_ONLY_KINDS} THEN 1 ELSE 0 END) AS animalCount,
              SUM(CASE WHEN weatherVisibility = 'dense_fog'
                         OR weatherPrecipitation IN ('snow','heavy_rain') THEN 1 ELSE 0 END) AS weatherCount
       FROM MediaFile

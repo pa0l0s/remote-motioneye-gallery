@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeAnimals } from "../../src/ai/normalize.js";
+import { normalizeAnimals, SPIDER_ONLY_KINDS } from "../../src/ai/normalize.js";
 
 describe("normalizeAnimals", () => {
   it("maps the phrasings the model actually produced in testing", () => {
@@ -25,6 +25,15 @@ describe("normalizeAnimals", () => {
     expect(normalizeAnimals(["a badger"])).toEqual({
       kinds: ["other"], kindsColumn: ",other,", count: 1,
     });
+  });
+
+  it("recognises the lens spider as its own kind", () => {
+    expect(normalizeAnimals(["spider"])).toEqual({
+      kinds: ["spider"], kindsColumn: SPIDER_ONLY_KINDS, count: 1,
+    });
+    // A spider alongside a real animal must NOT collapse to the spider-only column, or
+    // the frame would drop out of the "any animal" filter.
+    expect(normalizeAnimals(["a large spider on the lens", "bird"]).kindsColumn).toBe(",bird,spider,");
   });
 
   it("returns nothing for an empty list", () => {

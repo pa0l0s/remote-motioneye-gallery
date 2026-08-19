@@ -58,6 +58,15 @@ async function main(): Promise<void> {
 
   let personHit = 0, personTotal = 0, personFalse = 0, personNegTotal = 0;
   let animalHit = 0, animalTotal = 0, animalInvented = 0, animalNegTotal = 0;
+  // Frames whose only subject is a spider on the lens. These are scored on their own,
+  // never as animal negatives: "spider" IS the wanted answer for them, so counting them
+  // in `animalInvented` would fail the run for behaving correctly.
+  let spiderHit = 0, spiderTotal = 0, spiderAsAnimal = 0;
+  // A fixture entry carrying `knownFail` is a case that is understood and root-caused but
+  // not fixable at the configured settings. It is measured and reported, but excluded
+  // from the thresholds — and if it starts PASSING the run fails, because a stale
+  // exemption silently lowers the bar for everything measured after it.
+  const xfail: Array<[string, boolean, string]> = [];
   const latencies: number[] = [];
   let fogHit = 0, fogTotal = 0, snowHit = 0, snowTotal = 0;
   const wLatencies: number[] = [];
@@ -73,7 +82,16 @@ async function main(): Promise<void> {
         if (f.people > 0) { personTotal++; if (r.peopleCount > 0) personHit++; }
         else { personNegTotal++; if (r.peopleCount > 0) personFalse++; }
 
-        if (f.animals.length > 0) { animalTotal++; if (kinds.length > 0) animalHit++; }
+        if (f.spider && f.knownFail) {
+          const ok = kinds.includes("spider") && !kinds.some((k: string) => k !== "spider");
+          xfail.push([f.path, ok, `${JSON.stringify(kinds)} — ${f.knownFail}`]);
+        } else if (f.spider) {
+          spiderTotal++;
+          if (kinds.includes("spider")) spiderHit++;
+          // The regression this guards: a lens spider reported as a bird (or any other
+          // species), which is what put it in the "animals were here" filter.
+          if (kinds.some((k) => k !== "spider")) spiderAsAnimal++;
+        } else if (f.animals.length > 0) { animalTotal++; if (kinds.length > 0) animalHit++; }
         else { animalNegTotal++; if (kinds.length > 0) animalInvented++; }
 
         console.log(`${f.path.padEnd(28)} people=${r.peopleCount} animals=${JSON.stringify(kinds)}`);
@@ -87,7 +105,8 @@ async function main(): Promise<void> {
         // observed for it.
         console.error(`SKIP ${f.path}: ${e instanceof Error ? e.message : String(e)}`);
         if (f.people > 0) personTotal++;
-        if (f.animals.length > 0) animalTotal++;
+        if (f.spider && !f.knownFail) spiderTotal++;
+        else if (f.animals.length > 0) animalTotal++;
       }
     }
 
@@ -126,14 +145,29 @@ async function main(): Promise<void> {
     ["person false alarms", personNegTotal > 0 && personFalse === 0, `${personFalse}/${personNegTotal}`],
     ["animal recall", animalTotal > 0 && animalHit === animalTotal, `${animalHit}/${animalTotal}`],
     ["invented animals", animalNegTotal > 0 && animalInvented === 0, `${animalInvented}/${animalNegTotal}`],
+    ["lens spider labelled", spiderTotal > 0 && spiderHit === spiderTotal, `${spiderHit}/${spiderTotal}`],
+    ["spider taken for an animal", spiderTotal > 0 && spiderAsAnimal === 0, `${spiderAsAnimal}/${spiderTotal}`],
     ["dense fog", fogTotal > 0 && fogHit === fogTotal, `${fogHit}/${fogTotal}`],
     ["snow", snowTotal > 0 && snowHit === snowTotal, `${snowHit}/${snowTotal}`],
     ["semantic latency <= 2000 ms", latencies.length > 0 && (median(latencies) as number) <= 2000, fmtMs(latencies)],
     ["weather latency <= 4000 ms", wLatencies.length > 0 && (median(wLatencies) as number) <= 4000, fmtMs(wLatencies)],
   ];
 
+  if (xfail.length) {
+    console.log("\n=== known limitations (measured, not gated) ===");
+    for (const [path, passed, detail] of xfail) {
+      console.log(`${passed ? "XPASS" : "xfail"} ${path.padEnd(24)} ${detail}`);
+    }
+  }
+
   console.log("\n=== thresholds ===");
   let failed = false;
+  for (const [path, passed] of xfail) {
+    if (passed) {
+      console.log(`FAIL  known limitation now passes — ${path}: remove its knownFail marker`);
+      failed = true;
+    }
+  }
   for (const [name, ok, detail] of checks) {
     console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(30)} ${detail}`);
     if (!ok) failed = true;

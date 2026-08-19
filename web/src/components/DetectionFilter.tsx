@@ -17,12 +17,16 @@ const BASIC = [{ id: "motion", label: "ruch w kadrze" }];
 
 const EXTENDED = [
   { id: "people", label: "osoba" },
-  { id: "animal", label: "zwierzę — dowolne" },
+  { id: "animal", label: "zwierzę — dowolne (bez pająków)" },
   { id: "animal:bird", label: "ptak", indent: true },
   { id: "animal:dog", label: "pies", indent: true },
   { id: "animal:horse", label: "koń", indent: true },
   { id: "animal:deer", label: "sarna", indent: true },
   { id: "animal:other", label: "inne", indent: true },
+  // Not indented, because it is not one of the species above: a spider sits on the lens
+  // rather than in the scene, so "zwierzę — dowolne" deliberately does not match it and
+  // this is the only way to see those frames.
+  { id: "animal:spider", label: "pająk na obiektywie" },
   { id: "fog", label: "gęsta mgła" },
   { id: "snow", label: "opad śniegu" },
   { id: "snow_ground", label: "śnieg na ziemi" },

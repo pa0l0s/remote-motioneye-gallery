@@ -61,6 +61,9 @@ export interface AiStatus {
   weatherScanned: number;
   withPeople: number;
   withAnimals: number;
+  /** Frames carrying a lens spider — counted separately, since the spider filter is its
+   *  own row and withAnimals deliberately excludes spider-only frames. */
+  withSpiders: number;
   withWeather: number;
   avgLatencyMs: number | null;
   lastError: string | null;

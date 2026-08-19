@@ -6,7 +6,17 @@
  * `contains: ",bird,"` without also matching ",blackbird,".
  */
 
-const SPECIES = ["bird", "dog", "cat", "horse", "deer", "boar", "fox", "hare"] as const;
+const SPECIES = ["bird", "dog", "cat", "horse", "deer", "boar", "fox", "hare", "spider"] as const;
+
+/**
+ * A spider on the lens is recorded like any other kind so it stays filterable, but it is
+ * NOT what "an animal was in the scene" means: it is an insect sitting on the glass, and
+ * counting it would flood the generic animal filter and the timeline rail with night
+ * frames. Because `kindsColumn` joins the kinds sorted and comma-wrapped, a column equal
+ * to exactly this string is the precise test for "spider and nothing else"; ",bird,spider,"
+ * still counts as an animal, correctly.
+ */
+export const SPIDER_ONLY_KINDS = ",spider,";
 
 export interface NormalisedAnimals {
   kinds: string[];

@@ -222,6 +222,7 @@ export function App() {
               motion: totalActivity,
               people: aiStatus?.withPeople ?? 0,
               animal: aiStatus?.withAnimals ?? 0,
+              "animal:spider": aiStatus?.withSpiders ?? 0,
             }}
             aiAvailable={(aiStatus?.scanned ?? 0) > 0}
             aiEnabled={aiStatus?.enabled ?? false}

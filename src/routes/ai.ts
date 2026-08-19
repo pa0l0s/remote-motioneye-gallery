@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { AppConfig } from "../config.js";
 import type { AiScanControl } from "../ai/scanner.js";
+import { SPIDER_ONLY_KINDS } from "../ai/normalize.js";
 
 export interface AiRouteDeps {
   prisma: PrismaClient;
@@ -43,19 +44,31 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         weatherScanned: 0,
         withPeople: 0,
         withAnimals: 0,
+        withSpiders: 0,
         withWeather: 0,
         avgLatencyMs: null,
         lastError: null,
       };
     }
 
-    const [total, scanned, weatherScanned, withPeople, withAnimals, withWeather, latency] =
+    const [total, scanned, weatherScanned, withPeople, withAnimals, withSpiders, withWeather, latency] =
       await Promise.all([
         prisma.mediaFile.count({ where: localImage }),
         prisma.mediaFile.count({ where: { ...localImage, aiScannedAt: { not: null } } }),
         prisma.mediaFile.count({ where: { ...localImage, weatherVisibility: { not: null } } }),
         prisma.mediaFile.count({ where: { ...localImage, aiPeopleCount: { gt: 0 } } }),
-        prisma.mediaFile.count({ where: { ...localImage, aiAnimalKinds: { not: null } } }),
+        // Same rule as the "any animal" filter: a lens spider is not an animal in the scene.
+        prisma.mediaFile.count({
+          where: {
+            ...localImage,
+            AND: [{ aiAnimalKinds: { not: null } }, { aiAnimalKinds: { not: SPIDER_ONLY_KINDS } }],
+          },
+        }),
+        // Counted on its own, not folded into withAnimals: the spider filter is a
+        // separate row in the UI and needs its own tally.
+        prisma.mediaFile.count({
+          where: { ...localImage, aiAnimalKinds: { contains: ",spider," } },
+        }),
         prisma.mediaFile.count({
           where: {
             ...localImage,
@@ -81,6 +94,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       weatherScanned,
       withPeople,
       withAnimals,
+      withSpiders,
       withWeather,
       avgLatencyMs: latency._avg.aiLatencyMs ? Math.round(latency._avg.aiLatencyMs) : null,
       lastError: control?.lastError ?? null,

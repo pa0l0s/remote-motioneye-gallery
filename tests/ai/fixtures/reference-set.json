@@ -13,9 +13,14 @@
     { "path": "2025-04-12/05-55-00.jpg", "people": 0, "animals": ["dog"] },
     { "path": "2025-11-11/12-30-00.jpg", "people": 0, "animals": ["horse", "horse"] },
     { "path": "2026-03-10/12-00-00.jpg", "people": 0, "animals": [] },
-    { "path": "2026-03-10/00-00-00.jpg", "people": 0, "animals": [] },
+    { "path": "2026-03-10/00-00-00.jpg", "people": 0, "animals": [], "spider": true },
     { "path": "2025-12-05/09-00-00.jpg", "people": 0, "animals": [] },
-    { "path": "2025-12-05/12-00-00.jpg", "people": 0, "animals": [] }
+    { "path": "2025-12-05/12-00-00.jpg", "people": 0, "animals": [] },
+
+    { "path": "2026-05-24/05-30-00.jpg", "people": 0, "animals": [], "spider": true,
+      "knownFail": "spider is ~20x25px in the 1920px source; resizing to AI_IMAGE_WIDTH=1024 destroys the legs and it reads as a distant bird (3/3 runs). Answers spider at 1440 and 1920 (2/2 each), but sustained 1440px traffic crashed LM Studio - see the AI_IMAGE_WIDTH note in src/config.ts" },
+    { "path": "2026-08-13/02-50-00.jpg", "people": 0, "animals": [], "spider": true },
+    { "path": "2026-05-19/00-50-00.jpg", "people": 0, "animals": [], "spider": true }
   ],
   "weather": [
     { "path": "2025-09-26/06-27-30.jpg", "visibility": "dense_fog" },

@@ -22,12 +22,20 @@ describe("buildDetectionWhere", () => {
   it("supports any-animal, weather and night", () => {
     expect(buildDetectionWhere("animal,fog,snow,snow_ground,night")).toEqual({
       OR: [
-        { aiAnimalKinds: { not: null } },
+        { AND: [{ aiAnimalKinds: { not: null } }, { aiAnimalKinds: { not: ",spider," } }] },
         { weatherVisibility: "dense_fog" },
         { weatherPrecipitation: "snow" },
         { weatherSnowOnGround: true },
         { isNightIr: true },
       ],
+    });
+  });
+
+  it("keeps the lens spider out of any-animal but filterable on its own", () => {
+    // A spider sits on the glass, not in the scene: "animal" must skip a frame labelled
+    // only ",spider," while animal:spider is the way to find those frames.
+    expect(buildDetectionWhere("animal:spider")).toEqual({
+      OR: [{ aiAnimalKinds: { contains: ",spider," } }],
     });
   });
 

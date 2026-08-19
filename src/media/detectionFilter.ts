@@ -8,18 +8,25 @@
  * obstruction (true almost always), and haze (unstable at the overcast boundary).
  */
 
+import { SPIDER_ONLY_KINDS } from "../ai/normalize.js";
+
 type Where = Record<string, unknown>;
 
 // Must stay in step with the SPECIES list in src/ai/normalize.ts — adding a species means
 // changing both files. "other" is the fallback bucket normalize.ts uses for an unrecognised
 // animal, but it is still a real value that can land in the comma-wrapped column, so it is
 // filterable too.
-const SPECIES = ["bird", "dog", "cat", "horse", "deer", "boar", "fox", "hare", "other"];
+const SPECIES = ["bird", "dog", "cat", "horse", "deer", "boar", "fox", "hare", "spider", "other"];
 
 function clauseFor(kind: string): Where | null {
   if (kind === "motion") return { hasActivity: true };
   if (kind === "people") return { aiPeopleCount: { gt: 0 } };
-  if (kind === "animal") return { aiAnimalKinds: { not: null } };
+  // "any animal" deliberately excludes a frame whose only kind is the lens spider: it is
+  // an insect on the glass rather than an animal in the scene, and folding it in here
+  // would swamp the filter with night frames. It stays reachable as animal:spider.
+  if (kind === "animal") {
+    return { AND: [{ aiAnimalKinds: { not: null } }, { aiAnimalKinds: { not: SPIDER_ONLY_KINDS } }] };
+  }
   if (kind === "fog") return { weatherVisibility: "dense_fog" };
   if (kind === "snow") return { weatherPrecipitation: "snow" };
   if (kind === "snow_ground") return { weatherSnowOnGround: true };
