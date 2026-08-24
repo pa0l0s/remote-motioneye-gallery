@@ -51,6 +51,14 @@ export async function ensureDownloaded(args: EnsureArgs): Promise<string> {
     throw new Error(`download ${mediaFile.remotePath} produced 0 bytes`);
   }
 
-  await prisma.mediaFile.update({ where: { id: mediaFile.id }, data: { isDownloaded: true } });
+  // downloadedAt is stamped HERE and not on the "already on disk" branch above. That
+  // branch fires when the indexer meets a file the archive already held, and treating
+  // those as fresh arrivals would push the whole backlog through the extended pass's
+  // priority tier — the opposite of what the tier is for. Only a transfer that just
+  // happened counts.
+  await prisma.mediaFile.update({
+    where: { id: mediaFile.id },
+    data: { isDownloaded: true, downloadedAt: new Date() },
+  });
   return local;
 }

@@ -125,10 +125,40 @@ export async function runAiScanOnce(args: {
   let cursorTs = new Date("9999-12-31T23:59:59.999Z"); // far future: first page has no real cursor yet
   let cursorId = Number.MAX_SAFE_INTEGER;
 
+  // Frames already served from the priority tier this call. The tier is re-queried every
+  // page (so a download arriving mid-batch waits at most one page rather than a whole
+  // batch), and its rows carry no cursor of their own -- a frame that fails without
+  // giving up still matches the tier's filter and would be handed back immediately by
+  // the very next page. This set is what makes the tier move on, the way cursorTs/
+  // cursorId do for the backlog walk.
+  const servedFresh = new Set<number>();
+
   while (visited < opts.batch) {
     if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
 
-    const page = await prisma.mediaFile.findMany({
+    // Priority tier: frames that arrived over the wire and have never been looked at.
+    // Ordered by arrival, not by capture time -- a frame shot in March and fetched a
+    // minute ago sorts to its March position in the backlog walk below, behind tens of
+    // thousands of others, which is exactly the wait this exists to remove.
+    //
+    // `aiScannedAt: null` and not the backlog's promptVersion test: re-scanning an
+    // already-labelled frame after a prompt bump is backlog work. Without that, every
+    // bump would have the same downloaded frames pre-empt the queue all over again.
+    const fresh = await prisma.mediaFile.findMany({
+      where: {
+        fileType: "image",
+        isDownloaded: true,
+        aiFailures: { lt: opts.maxFailures },
+        aiScannedAt: null,
+        downloadedAt: { not: null },
+        id: { notIn: [...servedFresh] },
+      },
+      orderBy: [{ downloadedAt: "desc" }, { id: "desc" }],
+      take: Math.min(PAGE, opts.batch - visited),
+      select: { id: true, cameraId: true, localPath: true, timestamp: true },
+    });
+
+    const page = fresh.length ? fresh : await prisma.mediaFile.findMany({
       where: {
         fileType: "image",
         isDownloaded: true,
@@ -185,11 +215,20 @@ export async function runAiScanOnce(args: {
       return { scanned, weatherScanned, stopped: "unavailable" };
     }
 
+    const fromFreshTier = fresh.length > 0;
+
     for (const r of reads) {
       if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
       const f = r.f;
-      cursorTs = f.timestamp;
-      cursorId = f.id;
+      if (fromFreshTier) {
+        // A priority frame must NOT move the backlog cursor: these rows are ordered by
+        // arrival, so their capture times are arbitrary, and adopting one as the cursor
+        // would silently skip every backlog frame captured after it.
+        servedFresh.add(f.id);
+      } else {
+        cursorTs = f.timestamp;
+        cursorId = f.id;
+      }
       visited++;
 
       if (r.error !== null) {

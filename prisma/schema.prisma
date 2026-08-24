@@ -29,6 +29,11 @@ model MediaFile {
   timestamp     DateTime
   sizeBytes     Int?
   isDownloaded  Boolean  @default(false)
+  // When the file actually arrived over the wire. Null means "was already here / unknown",
+  // which is every row predating this column — i.e. the backlog. The extended pass reads
+  // it to serve a just-fetched frame ahead of two hundred thousand older ones, so it is
+  // deliberately NOT backfilled: a backfill would make the whole archive look fresh.
+  downloadedAt  DateTime?
   thumbReady    Boolean  @default(false)
   createdAt     DateTime @default(now())
 
@@ -61,6 +66,9 @@ model MediaFile {
   @@index([cameraId, timestamp])
   @@index([cameraId, hasActivity, timestamp])
   @@index([cameraId, aiScannedAt])
+  // Serves the priority tier: "downloaded recently and never AI-scanned". Without it the
+  // ordering by downloadedAt walks the whole table on every page of every batch.
+  @@index([aiScannedAt, downloadedAt])
   @@index([cameraId, aiPeopleCount, timestamp])
   @@index([cameraId, weatherVisibility, timestamp])
 }

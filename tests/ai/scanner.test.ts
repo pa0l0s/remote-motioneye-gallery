@@ -339,3 +339,95 @@ describe("runAiScanOnce", () => {
     expect(res.scanned).toBe(1);
   });
 });
+
+/**
+ * On-demand downloads. The archive is ~200k frames and most are not local; a frame the
+ * owner just pulled over the metered link must be labelled while they are still looking
+ * at it, not after the backlog drains. Capture-time ordering cannot express that: a frame
+ * shot in March and fetched today sorts to its March position, behind everything newer.
+ */
+describe("runAiScanOnce — freshly downloaded frames", () => {
+  it("serves a just-downloaded old frame before the newest backlog frame", async () => {
+    const cam = await seed(5); // captured 2026-01-01, newest is d/4.jpg
+    const old = await prisma.mediaFile.create({
+      data: {
+        cameraId: cam.id,
+        fileType: "image",
+        remotePath: "old/1.jpg",
+        localPath: "/media/old/1.jpg",
+        timestamp: new Date(Date.UTC(2025, 2, 1)), // captured long before every seeded frame
+        isDownloaded: true,
+        downloadedAt: new Date(), // ...but fetched just now
+      },
+    });
+
+    const seen: string[] = [];
+    await runAiScanOnce({
+      prisma,
+      control: control(),
+      opts: { ...OPTS, batch: 1 },
+      deps: deps({ loadJpeg: async (p: string) => { seen.push(p); return Buffer.from([1]); } }),
+    });
+    expect(seen).toEqual([old.localPath]);
+  });
+
+  it("orders several fresh downloads newest-fetched first", async () => {
+    const cam = await seed(1);
+    const mk = (n: string, fetchedMsAgo: number) =>
+      prisma.mediaFile.create({
+        data: {
+          cameraId: cam.id, fileType: "image", remotePath: `f/${n}.jpg`, localPath: `/media/f/${n}.jpg`,
+          timestamp: new Date(Date.UTC(2025, 2, 1)), isDownloaded: true,
+          downloadedAt: new Date(Date.now() - fetchedMsAgo),
+        },
+      });
+    await mk("older", 60_000);
+    const newest = await mk("newest", 1_000);
+
+    const seen: string[] = [];
+    await runAiScanOnce({
+      prisma, control: control(), opts: { ...OPTS, batch: 1 },
+      deps: deps({ loadJpeg: async (p: string) => { seen.push(p); return Buffer.from([1]); } }),
+    });
+    expect(seen).toEqual([newest.localPath]);
+  });
+
+  it("does not let an already-scanned frame jump the queue again after a prompt bump", async () => {
+    // Re-scanning on a new prompt version is backlog work, not a fresh arrival. Without
+    // this the same downloaded frames would keep pre-empting everything on every bump.
+    const cam = await seed(3);
+    await prisma.mediaFile.create({
+      data: {
+        cameraId: cam.id, fileType: "image", remotePath: "done/1.jpg", localPath: "/media/done/1.jpg",
+        timestamp: new Date(Date.UTC(2025, 2, 1)), isDownloaded: true,
+        downloadedAt: new Date(),
+        aiScannedAt: new Date(), aiPromptVersion: "semantics-v0", aiPeopleCount: 0,
+      },
+    });
+
+    const seen: string[] = [];
+    await runAiScanOnce({
+      prisma, control: control(), opts: { ...OPTS, batch: 1 },
+      deps: deps({ loadJpeg: async (p: string) => { seen.push(p); return Buffer.from([1]); } }),
+    });
+    expect(seen).toEqual(["/media/d/2.jpg"]); // newest seeded frame, not the re-scan
+  });
+
+  it("stops preferring a fresh frame once it has exhausted its retries", async () => {
+    const cam = await seed(2);
+    await prisma.mediaFile.create({
+      data: {
+        cameraId: cam.id, fileType: "image", remotePath: "bad/1.jpg", localPath: "/media/bad/1.jpg",
+        timestamp: new Date(Date.UTC(2025, 2, 1)), isDownloaded: true,
+        downloadedAt: new Date(), aiFailures: OPTS.maxFailures,
+      },
+    });
+
+    const seen: string[] = [];
+    await runAiScanOnce({
+      prisma, control: control(), opts: { ...OPTS, batch: 1 },
+      deps: deps({ loadJpeg: async (p: string) => { seen.push(p); return Buffer.from([1]); } }),
+    });
+    expect(seen).toEqual(["/media/d/1.jpg"]);
+  });
+});
