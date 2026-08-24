@@ -173,7 +173,13 @@ export function startAiRunner(args: {
         // (measured ~8s from unloaded to a 200 response), so this needs a longer
         // timeout than the plain probe above.
         ensureLoaded: (i) =>
-          ensureModelLoaded({ ...askFor(i), timeoutMs: 30000 }, cfg.ai.modelTtlSeconds),
+          ensureModelLoaded(
+            // An explicit load is a cold start, not a health check: measured 7.1 s on the
+            // spare host, and slower hardware is exactly where this path is wanted.
+            { ...askFor(i), timeoutMs: 300000 },
+            cfg.ai.modelTtlSeconds,
+            cfg.ai.modelParallel,
+          ),
         endpointCount: endpoints.length,
         onEndpointChange: (i) => {
           if (control.activeUrl !== endpoints[i].url) {

@@ -128,3 +128,54 @@ describe("ensureModelLoaded", () => {
     ).resolves.toBe(false);
   });
 });
+
+describe("ensureModelLoaded with a parallel limit", () => {
+  it("uses the explicit load endpoint and passes parallel through", async () => {
+    let seen: { url: string; method: string; body: string } | null = null;
+    const url = await serve((req) => {
+      seen = req;
+      return { status: 200, body: JSON.stringify({ status: "loaded" }) };
+    });
+    await expect(
+      ensureModelLoaded({ url, model: "qwen/qwen3-vl-4b", timeoutMs: 2000 }, 1800, 1),
+    ).resolves.toBe(true);
+    expect(seen!.url).toBe("/api/v1/models/load");
+    const parsed = JSON.parse(seen!.body);
+    expect(parsed.parallel).toBe(1);
+    expect(parsed.model).toBe("qwen/qwen3-vl-4b");
+    // The endpoint rejects the whole request if ttl is present, so it must not be sent.
+    expect(parsed.ttl).toBeUndefined();
+  });
+
+  it("keeps the JIT path untouched when no parallel limit is configured", async () => {
+    const urls: string[] = [];
+    const url = await serve((req) => {
+      urls.push(req.url);
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "hi" } }] }) };
+    });
+    await expect(ensureModelLoaded({ url, model: "m", timeoutMs: 2000 }, 1800)).resolves.toBe(true);
+    expect(urls).toEqual(["/api/v0/chat/completions"]);
+  });
+
+  it("falls back to the JIT path on an LM Studio too old for the v1 API", async () => {
+    const urls: string[] = [];
+    const url = await serve((req) => {
+      urls.push(req.url);
+      return req.url === "/api/v1/models/load"
+        ? { status: 404, body: "{}" }
+        : { status: 200, body: JSON.stringify({ choices: [{ message: { content: "hi" } }] }) };
+    });
+    await expect(ensureModelLoaded({ url, model: "m", timeoutMs: 2000 }, 1800, 1)).resolves.toBe(true);
+    expect(urls).toEqual(["/api/v1/models/load", "/api/v0/chat/completions"]);
+  });
+
+  it("reports a refusal rather than silently retrying when the model itself is rejected", async () => {
+    const urls: string[] = [];
+    const url = await serve((req) => {
+      urls.push(req.url);
+      return { status: 400, body: JSON.stringify({ error: { message: "no such model" } }) };
+    });
+    await expect(ensureModelLoaded({ url, model: "m", timeoutMs: 2000 }, 1800, 1)).resolves.toBe(false);
+    expect(urls).toEqual(["/api/v1/models/load"]); // no pointless JIT retry
+  });
+});

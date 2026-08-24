@@ -46,6 +46,7 @@ services:
       # Priority-ordered "url|model" pairs, comma separated. Empty falls back to the
       # single AI_LMSTUDIO_URL/AI_MODEL pair above.
       AI_ENDPOINTS: "${AI_ENDPOINTS:-}"
+      AI_MODEL_PARALLEL: "${AI_MODEL_PARALLEL:-1}"
       AI_PROMPT_VERSION: "${AI_PROMPT_VERSION:-semantics-v2}"
       AI_WEATHER_PROMPT_VERSION: "${AI_WEATHER_PROMPT_VERSION:-weather-v1}"
       AI_WEATHER_MIN_GAP_SECONDS: "${AI_WEATHER_MIN_GAP_SECONDS:-600}"

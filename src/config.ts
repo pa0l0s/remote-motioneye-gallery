@@ -31,6 +31,8 @@ export interface AppConfig {
     imageWidth: number;
     /** Priority-ordered LM Studio hosts; index 0 is preferred. Never empty. */
     endpoints: AiEndpoint[];
+    /** Concurrent sequences LM Studio splits the context into when loading. */
+    modelParallel: number;
     promptVersion: string;
     weatherPromptVersion: string;
     weatherMinGapSeconds: number;
@@ -114,6 +116,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         url: (env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234").replace(/\/+$/, ""),
         model: env.AI_MODEL ?? "qwen/qwen3-vl-8b",
       }),
+      // 1, not LM Studio's default of 4: parallel sequences split the context and the
+      // VRAM, which is what tips a modest GPU from slow into dead. Setting it forces the
+      // explicit /api/v1/models/load path, which cannot carry a TTL — see ensureModelLoaded.
+      modelParallel: Number(env.AI_MODEL_PARALLEL ?? "1"),
       promptVersion: env.AI_PROMPT_VERSION ?? "semantics-v2",
       weatherPromptVersion: env.AI_WEATHER_PROMPT_VERSION ?? "weather-v1",
       weatherMinGapSeconds: Number(env.AI_WEATHER_MIN_GAP_SECONDS ?? "600"),

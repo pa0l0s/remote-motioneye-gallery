@@ -78,9 +78,45 @@ export async function probeModelAvailable(opts: ProbeOptions): Promise<"loaded" 
  * Never throws: a failed load attempt just means the model stays unloaded this tick;
  * the runner falls back to sleeping like a genuinely absent host.
  */
-export async function ensureModelLoaded(opts: ProbeOptions, ttlSeconds: number): Promise<boolean> {
+export async function ensureModelLoaded(
+  opts: ProbeOptions,
+  ttlSeconds: number,
+  parallel?: number,
+): Promise<boolean> {
+  const base = opts.url.replace(/\/+$/, "");
+
+  // Preferred path when a parallel limit is configured. LM Studio otherwise loads with
+  // parallel=4, splitting the context across four sequences; on a modest GPU that is
+  // what makes it fall over rather than merely run slow. Measured against a live host:
+  // /api/v1/models/load accepts `parallel` and echoes it back, and Auto-Evict replaces
+  // the previous instance rather than stacking a second one alongside it.
+  //
+  // The cost is real and one-way: this endpoint rejects `ttl` outright ("Unrecognized
+  // key"), and a later ttl-carrying request does NOT attach one to an already-loaded
+  // instance — verified, remaining_ttl_seconds stays null. So an explicitly loaded model
+  // stays resident until LM Studio unloads it or exits, instead of releasing its VRAM
+  // after idling. That is the intended trade: the owner governs availability by starting
+  // and stopping LM Studio anyway.
+  if (parallel !== undefined) {
+    try {
+      const res = await fetch(`${base}/api/v1/models/load`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(opts.timeoutMs),
+        body: JSON.stringify({ model: opts.model, parallel }),
+      });
+      if (res.ok) return true;
+      // 404 means an LM Studio too old for the v1 API: fall through to the JIT path
+      // below rather than leaving the pass unable to load anything at all. Any other
+      // status is a real refusal for this model and is reported as a failed load.
+      if (res.status !== 404) return false;
+    } catch {
+      return false;
+    }
+  }
+
   try {
-    const res = await fetch(`${opts.url.replace(/\/+$/, "")}/api/v0/chat/completions`, {
+    const res = await fetch(`${base}/api/v0/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(opts.timeoutMs),
