@@ -1,3 +1,5 @@
+import { parseAiEndpoints, type AiEndpoint } from "./ai/endpoints.js";
+
 export interface AppConfig {
   motionEyeUrl: string;
   motionEyeUser: string;
@@ -27,6 +29,8 @@ export interface AppConfig {
     model: string;
     probeIntervalSeconds: number;
     imageWidth: number;
+    /** Priority-ordered LM Studio hosts; index 0 is preferred. Never empty. */
+    endpoints: AiEndpoint[];
     promptVersion: string;
     weatherPromptVersion: string;
     weatherMinGapSeconds: number;
@@ -104,6 +108,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       // Answers are repeatable within one model-load session but not necessarily across
       // reloads, so measure inside the session you care about.
       imageWidth: Number(env.AI_IMAGE_WIDTH ?? "1024"),
+      // The list supersedes lmStudioUrl/model, which stay as the single-host fallback so
+      // an existing deployment keeps working with no config change at all.
+      endpoints: parseAiEndpoints(env.AI_ENDPOINTS, {
+        url: (env.AI_LMSTUDIO_URL ?? "http://192.168.0.11:1234").replace(/\/+$/, ""),
+        model: env.AI_MODEL ?? "qwen/qwen3-vl-8b",
+      }),
       promptVersion: env.AI_PROMPT_VERSION ?? "semantics-v2",
       weatherPromptVersion: env.AI_WEATHER_PROMPT_VERSION ?? "weather-v1",
       weatherMinGapSeconds: Number(env.AI_WEATHER_MIN_GAP_SECONDS ?? "600"),

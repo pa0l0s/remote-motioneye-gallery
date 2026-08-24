@@ -5,6 +5,7 @@ function state(over: Partial<AiRunnerState> = {}): AiRunnerState {
   return {
     control: { paused: false, scanning: false, modelLoaded: false, lastProbeAt: null, lastError: null },
     lastProbeMs: 0,
+    activeEndpoint: 0,
     ...over,
   };
 }
@@ -16,6 +17,7 @@ function deps(over: Partial<Parameters<typeof aiRunnerTick>[1]> = {}) {
     ensureLoaded: vi.fn().mockResolvedValue(false),
     autoloadModel: true,
     scan: vi.fn(),
+    endpointCount: 1,
     probeIntervalMs: 300_000,
     now: 1_000_000,
     ...over,
@@ -181,5 +183,111 @@ describe("aiRunnerTick", () => {
     expect(ensureLoaded).toHaveBeenCalledOnce();
     expect(scan).not.toHaveBeenCalled();
     expect(s.control.modelLoaded).toBe(false);
+  });
+});
+
+/**
+ * Multi-endpoint selection. The scenario that matters: the pass falls back to a weaker
+ * host, and 172k frames of backlog mean it would otherwise never look up again — the
+ * continuous-scan design deliberately skips probing while the model stays loaded.
+ */
+describe("aiRunnerTick — endpoint selection", () => {
+  /** Wiring for N endpoints; probes answers per index. */
+  function multi(answers: Array<"loaded" | "available" | "absent">, over: Record<string, unknown> = {}) {
+    return {
+      probe: vi.fn(async (i: number) => answers[i]),
+      ensureLoaded: vi.fn(async () => false),
+      endpointCount: answers.length,
+      autoloadModel: true,
+      scan: vi.fn().mockResolvedValue({ scanned: 200, weatherScanned: 0, stopped: "batch" }),
+      probeIntervalMs: 300_000,
+      now: 1_000_000,
+      ...over,
+    };
+  }
+
+  it("takes the first loaded endpoint and does not probe the rest", async () => {
+    const d = multi(["loaded", "loaded"]);
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(s.activeEndpoint).toBe(0);
+    expect(d.probe).toHaveBeenCalledTimes(1); // short-circuits on the first hit
+  });
+
+  it("falls through to a lower-priority endpoint when the preferred one is absent", async () => {
+    const d = multi(["absent", "loaded"]);
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(s.activeEndpoint).toBe(1);
+    expect(s.control.modelLoaded).toBe(true);
+  });
+
+  it("autoloads in priority order when nothing is resident anywhere", async () => {
+    const d = multi(["available", "available"], {
+      ensureLoaded: vi.fn(async (i: number) => i === 1), // the strong host refuses to load
+    });
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(d.ensureLoaded).toHaveBeenNthCalledWith(1, 0); // tried the preferred one first
+    expect(s.activeEndpoint).toBe(1);
+  });
+
+  it("does not spend a probe on upgrades while already on the preferred endpoint", async () => {
+    const d = multi(["loaded", "loaded"]);
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    d.probe.mockClear();
+    // Well past the probe interval, still scanning happily on index 0.
+    await aiRunnerTick(s, { ...d, now: 2_000_000 } as never);
+    expect(d.probe).not.toHaveBeenCalled();
+    expect(d.scan).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps checking back for the preferred endpoint while running on a weaker one", async () => {
+    const answers: Array<"loaded" | "available" | "absent"> = ["absent", "loaded"];
+    const d = multi(answers);
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(s.activeEndpoint).toBe(1);
+
+    // Before the interval elapses: no upgrade probe, just scanning.
+    d.probe.mockClear();
+    await aiRunnerTick(s, { ...d, now: 1_100_000 } as never);
+    expect(d.probe).not.toHaveBeenCalled();
+
+    // Past the interval, the strong host is back — the pass must notice and switch even
+    // though the model never stopped being "loaded" and the backlog never ran dry.
+    answers[0] = "loaded";
+    await aiRunnerTick(s, { ...d, now: 1_400_000 } as never);
+    expect(s.activeEndpoint).toBe(0);
+    expect(d.probe).toHaveBeenCalledWith(0);
+  });
+
+  it("never probes below the active endpoint when looking for an upgrade", async () => {
+    const d = multi(["absent", "absent", "loaded"]);
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(s.activeEndpoint).toBe(2);
+
+    d.probe.mockClear();
+    await aiRunnerTick(s, { ...d, now: 1_400_000 } as never);
+    expect(d.probe.mock.calls.map((c) => c[0])).toEqual([0, 1]);
+  });
+
+  it("restarts selection from the top of the list after the active endpoint dies", async () => {
+    const answers: Array<"loaded" | "available" | "absent"> = ["absent", "loaded"];
+    const d = multi(answers, {
+      scan: vi.fn().mockResolvedValue({ scanned: 3, weatherScanned: 0, stopped: "unavailable" }),
+    });
+    const s = state();
+    await aiRunnerTick(s, d as never);
+    expect(s.activeEndpoint).toBe(1);
+    expect(s.control.modelLoaded).toBe(false);
+
+    answers[0] = "loaded";
+    d.probe.mockClear();
+    await aiRunnerTick(s, { ...d, now: 1_400_000 } as never);
+    expect(d.probe).toHaveBeenNthCalledWith(1, 0);
+    expect(s.activeEndpoint).toBe(0);
   });
 });

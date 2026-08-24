@@ -15,6 +15,11 @@ export interface AiScanControl {
   modelLoaded: boolean;
   lastProbeAt: Date | null;
   lastError: string | null;
+  /** Which configured LM Studio host is serving right now. Null until the first
+   *  successful selection. Surfaced by /api/ai/status so a label produced by the weaker
+   *  fallback model can be explained rather than guessed at. */
+  activeUrl?: string | null;
+  activeModel?: string | null;
 }
 
 export interface AiScanOptions {
