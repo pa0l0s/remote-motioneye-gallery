@@ -36,3 +36,6 @@ docs/reports/
 
 # Temporary local probe used while tuning the spider prompt; not part of the project.
 scripts/*.local.*
+
+# Local helper: the resume command for the last session. Scratch, not project.
+last-session.txt

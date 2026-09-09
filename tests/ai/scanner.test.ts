@@ -431,3 +431,57 @@ describe("runAiScanOnce — freshly downloaded frames", () => {
     expect(seen).toEqual(["/media/d/1.jpg"]);
   });
 });
+
+/**
+ * Yielding a batch back when a better host returns. The runner only reconsiders endpoints
+ * between batches, and a batch is AI_BATCH frames — 200 of them at ~31 s on the fallback
+ * host is over an hour and a half. Without a check inside the batch, a returning 8B host
+ * sits idle that whole time while the 4B keeps grinding.
+ */
+describe("runAiScanOnce — yielding to a better endpoint", () => {
+  it("ends the batch before doing any work when a better host is already back", async () => {
+    await seed(5);
+    const seen: string[] = [];
+    const res = await runAiScanOnce({
+      prisma,
+      control: control(),
+      opts: OPTS,
+      deps: deps({
+        loadJpeg: async (p: string) => { seen.push(p); return Buffer.from([1]); },
+        betterEndpointAvailable: async () => true,
+      }),
+    });
+    // "batch", not "unavailable": nothing failed, the host was simply outranked.
+    expect(res.stopped).toBe("batch");
+    expect(res.scanned).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it("scans normally while no better host is available", async () => {
+    await seed(3);
+    const res = await runAiScanOnce({
+      prisma, control: control(), opts: OPTS,
+      deps: deps({ betterEndpointAvailable: async () => false }),
+    });
+    expect(res.scanned).toBe(3);
+  });
+
+  it("asks once per page, not once per frame", async () => {
+    // PAGE is 50, so a 3-frame archive is a single page: one check for the page it
+    // processes, one for the page that comes back empty.
+    await seed(3);
+    let asked = 0;
+    await runAiScanOnce({
+      prisma, control: control(), opts: OPTS,
+      deps: deps({ betterEndpointAvailable: async () => { asked++; return false; } }),
+    });
+    expect(asked).toBe(2);
+  });
+
+  it("scans normally when the caller supplies no check at all", async () => {
+    // Single-endpoint deployments never pass one; the pass must behave exactly as before.
+    await seed(3);
+    const res = await runAiScanOnce({ prisma, control: control(), opts: OPTS, deps: deps() });
+    expect(res.scanned).toBe(3);
+  });
+});

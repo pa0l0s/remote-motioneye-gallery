@@ -43,6 +43,14 @@ export interface AiScanDeps {
   isNight: (path: string, colorThreshold: number) => Promise<boolean>;
   askSemantics: (jpeg: Buffer) => Promise<SemanticResult>;
   askWeather: (jpeg: Buffer) => Promise<WeatherResult>;
+  /**
+   * Optional: "a higher-priority LM Studio host is reachable again". Consulted once per
+   * page so the batch can be handed back promptly instead of running to completion on a
+   * fallback host — 200 frames at ~31 s is over 90 minutes, which is how long a returning
+   * fast host would otherwise sit unused. Omitted by single-endpoint callers, where the
+   * pass behaves exactly as it did before.
+   */
+  betterEndpointAvailable?: () => Promise<boolean>;
 }
 
 export interface AiScanResult {
@@ -135,6 +143,14 @@ export async function runAiScanOnce(args: {
 
   while (visited < opts.batch) {
     if (control.paused) return { scanned, weatherScanned, stopped: "paused" };
+
+    // Checked before the page is fetched, so the handover costs at most one page rather
+    // than the rest of the batch. Reported as "batch" and not "unavailable": nothing
+    // failed here and nothing should be marked — this host was simply outranked, and the
+    // runner's next tick re-selects from the top of the endpoint list.
+    if (deps.betterEndpointAvailable && (await deps.betterEndpointAvailable())) {
+      return { scanned, weatherScanned, stopped: "batch" };
+    }
 
     // Priority tier: frames that arrived over the wire and have never been looked at.
     // Ordered by arrival, not by capture time -- a frame shot in March and fetched a

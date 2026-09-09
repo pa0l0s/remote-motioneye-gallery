@@ -161,6 +161,37 @@ export function startAiRunner(args: {
     timeoutMs: cfg.ai.requestTimeoutMs,
   });
 
+  // Rate-limits the in-batch upgrade check on its own clock. The tick's `now` is sampled
+  // once per tick, and a tick spends most of its life inside scan(), so it cannot be used
+  // to pace something that runs during the scan.
+  let lastUpgradeCheckMs = 0;
+
+  /**
+   * "Is a preferred host reachable again?" — asked once per page from inside the batch.
+   * Deliberately only ASKS: switching endpoints mid-page would leave the remaining frames
+   * of that page talking to a different host than the one they were selected against.
+   * The scan ends the batch, and the tick that follows performs the real selection,
+   * including any autoload.
+   */
+  async function betterEndpointAvailable(): Promise<boolean> {
+    if (state.activeEndpoint === 0) return false; // nothing outranks the preferred host
+    const now = Date.now();
+    if (now - lastUpgradeCheckMs < cfg.ai.probeIntervalSeconds * 1000) return false;
+    lastUpgradeCheckMs = now;
+    for (let i = 0; i < state.activeEndpoint; i++) {
+      const r = await probeModelAvailable({ ...askFor(i), timeoutMs: 5000 });
+      if (r === "loaded" || (r === "available" && cfg.ai.autoloadModel)) {
+        // Force the next tick into its upgrade branch. Without this, a selection made
+        // less than one probe interval ago leaves dueForProbe false, the tick scans
+        // straight past the handover, and the whole point of yielding early is lost
+        // until the batch after next.
+        state.lastProbeMs = -Infinity;
+        return true;
+      }
+    }
+    return false;
+  }
+
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
@@ -211,6 +242,7 @@ export function startAiRunner(args: {
               isNight: (path, threshold) => isNightFrame(path, threshold),
               askSemantics: (jpeg) => askSemantics(askFor(state.activeEndpoint), jpeg),
               askWeather: (jpeg) => askWeather(askFor(state.activeEndpoint), jpeg),
+              betterEndpointAvailable,
             },
           }),
         probeIntervalMs: cfg.ai.probeIntervalSeconds * 1000,
